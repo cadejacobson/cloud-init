@@ -4,10 +4,9 @@
 import os
 import re
 import unittest
-from textwrap import dedent
 from unittest import mock
+import json
 from xml.etree import ElementTree as ET
-from xml.sax.saxutils import escape, unescape
 
 import pytest
 import requests
@@ -59,53 +58,29 @@ GOAL_STATE_TEMPLATE = """\
 </GoalState>
 """
 
-HEALTH_REPORT_XML_TEMPLATE = """\
-<?xml version="1.0" encoding="utf-8"?>
-<Health xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
- xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <GoalStateIncarnation>{incarnation}</GoalStateIncarnation>
-  <Container>
-    <ContainerId>{container_id}</ContainerId>
-    <RoleInstanceList>
-      <Role>
-        <InstanceId>{instance_id}</InstanceId>
-        <Health>
-          <State>{health_status}</State>
-          {health_detail_subsection}
-        </Health>
-      </Role>
-    </RoleInstanceList>
-  </Container>
-</Health>
-"""
-
-
-def get_formatted_health_report_xml_bytes(
-    container_id: str,
-    incarnation: int,
-    instance_id: str,
+def get_formatted_health_report_json_bytes(
     health_status: str,
-    health_detail_subsection: str,
 ) -> bytes:
-    return HEALTH_REPORT_XML_TEMPLATE.format(
-        container_id=container_id,
-        incarnation=incarnation,
-        instance_id=instance_id,
-        health_status=health_status,
-        health_detail_subsection=health_detail_subsection,
-    ).encode("utf-8")
+    health_report = {"state": health_status}
+    return json.dumps(health_report).encode("utf-8")
 
 
-HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE = dedent(
-    """\
-    <Details>
-      <SubStatus>{health_substatus}</SubStatus>
-      <Description>{health_description}</Description>
-    </Details>
-    """
-)
+def get_formatted_health_report_with_details_json_bytes(
+    health_status: str,
+    health_substatus: str,
+    health_description: str
+) -> bytes:
+    health_report = {
+        "state": health_status,
+        "details": {
+            "subStatus": health_substatus,
+            "description": health_description
+        }
+    }
+    return json.dumps(health_report).encode("utf-8")
 
 HEALTH_REPORT_DESCRIPTION_TRIM_LEN = 512
+
 MOCKPATH = "cloudinit.sources.helpers.azure."
 
 
@@ -555,17 +530,11 @@ class TestOpenSSLManagerActions:
 class TestGoalStateHealthReporter:
     maxDiff = None
 
-    default_parameters = {
-        "incarnation": 1634,
-        "container_id": "MyContainerId",
-        "instance_id": "MyInstanceId",
-    }
-
     test_azure_endpoint = "TestEndpoint"
-    test_health_report_url = "http://{0}/machine?comp=health".format(
+    test_health_report_url = "http://{0}/provisioning/health".format(
         test_azure_endpoint
     )
-    test_default_headers = {"Content-Type": "text/xml; charset=utf-8"}
+    test_default_headers = {"Content-Type": "application/json; charset=utf-8"}
 
     provisioning_success_status = "Ready"
     provisioning_not_ready_status = "NotReady"
@@ -582,50 +551,23 @@ class TestGoalStateHealthReporter:
             azure_helper.AzureEndpointHttpClient, "post"
         )
         self.GoalState = mocker.patch.object(azure_helper, "GoalState")
-        self.GoalState.return_value.container_id = self.default_parameters[
-            "container_id"
-        ]
-        self.GoalState.return_value.instance_id = self.default_parameters[
-            "instance_id"
-        ]
-        self.GoalState.return_value.incarnation = self.default_parameters[
-            "incarnation"
-        ]
 
-    def _text_from_xpath_in_xroot(self, xroot, xpath):
-        element = xroot.find(xpath)
-        if element is not None:
-            return element.text
-        return None
-
-    def _get_formatted_health_detail_subsection_xml_string(self, **kwargs):
-        return HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE.format(**kwargs)
+    def _get_formatted_health_detail_subsection_json_string(self, **kwargs):
+        return json.dumps({
+            "subStatus": kwargs.get("health_substatus", ""),
+            "description": kwargs.get("health_description", "")
+        })
 
     def _get_report_ready_health_document(self):
-        return get_formatted_health_report_xml_bytes(
-            incarnation=escape(str(self.default_parameters["incarnation"])),
-            container_id=escape(self.default_parameters["container_id"]),
-            instance_id=escape(self.default_parameters["instance_id"]),
-            health_status=escape(self.provisioning_success_status),
-            health_detail_subsection="",
+        return get_formatted_health_report_json_bytes(
+            health_status=self.provisioning_success_status,
         )
 
     def _get_report_failure_health_document(self):
-        health_detail_subsection = (
-            self._get_formatted_health_detail_subsection_xml_string(
-                health_substatus=escape(self.provisioning_failure_substatus),
-                health_description=escape(
-                    self.provisioning_failure_err_description
-                ),
-            )
-        )
-
-        return get_formatted_health_report_xml_bytes(
-            incarnation=escape(str(self.default_parameters["incarnation"])),
-            container_id=escape(self.default_parameters["container_id"]),
-            instance_id=escape(self.default_parameters["instance_id"]),
-            health_status=escape(self.provisioning_not_ready_status),
-            health_detail_subsection=health_detail_subsection,
+        return get_formatted_health_report_with_details_json_bytes(
+            health_status=self.provisioning_not_ready_status,
+            health_substatus=self.provisioning_failure_substatus,
+            health_description=self.provisioning_failure_err_description,
         )
 
     def test_send_ready_signal_sends_post_request(self):
@@ -682,49 +624,14 @@ class TestGoalStateHealthReporter:
             self.test_azure_endpoint,
         )
         generated_health_document = reporter.build_report(
-            incarnation=self.default_parameters["incarnation"],
-            container_id=self.default_parameters["container_id"],
-            instance_id=self.default_parameters["instance_id"],
             status=self.provisioning_success_status,
         )
 
         assert health_document == generated_health_document
 
-        generated_xroot = ET.fromstring(generated_health_document)
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot, "./GoalStateIncarnation"
-        ) == str(self.default_parameters["incarnation"])
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot, "./Container/ContainerId"
-        ) == str(self.default_parameters["container_id"])
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot, "./Container/RoleInstanceList/Role/InstanceId"
-        ) == str(self.default_parameters["instance_id"])
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/State",
-        ) == escape(self.provisioning_success_status)
-        assert (
-            self._text_from_xpath_in_xroot(
-                generated_xroot,
-                "./Container/RoleInstanceList/Role/Health/Details",
-            )
-            is None
-        )
-        assert (
-            self._text_from_xpath_in_xroot(
-                generated_xroot,
-                "./Container/RoleInstanceList/Role/Health/Details/SubStatus",
-            )
-            is None
-        )
-        assert (
-            self._text_from_xpath_in_xroot(
-                generated_xroot,
-                "./Container/RoleInstanceList/Role/Health/Details/Description",
-            )
-            is None
-        )
+        generated_json = json.loads(generated_health_document.decode("utf-8"))
+        assert generated_json["state"] == self.provisioning_success_status
+        assert "details" not in generated_json
 
     def test_build_report_for_failure_signal_health_document(self):
         health_document = self._get_report_failure_health_document()
@@ -734,9 +641,6 @@ class TestGoalStateHealthReporter:
             self.test_azure_endpoint,
         )
         generated_health_document = reporter.build_report(
-            incarnation=self.default_parameters["incarnation"],
-            container_id=self.default_parameters["container_id"],
-            instance_id=self.default_parameters["instance_id"],
             status=self.provisioning_not_ready_status,
             substatus=self.provisioning_failure_substatus,
             description=self.provisioning_failure_err_description,
@@ -744,34 +648,11 @@ class TestGoalStateHealthReporter:
 
         assert health_document == generated_health_document
 
-        generated_xroot = ET.fromstring(generated_health_document)
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot, "./GoalStateIncarnation"
-        ) == str(self.default_parameters["incarnation"])
-        assert (
-            self._text_from_xpath_in_xroot(
-                generated_xroot, "./Container/ContainerId"
-            )
-            == self.default_parameters["container_id"]
-        )
-        assert (
-            self._text_from_xpath_in_xroot(
-                generated_xroot, "./Container/RoleInstanceList/Role/InstanceId"
-            )
-            == self.default_parameters["instance_id"]
-        )
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/State",
-        ) == escape(self.provisioning_not_ready_status)
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/Details/SubStatus",
-        ) == escape(self.provisioning_failure_substatus)
-        assert self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/Details/Description",
-        ) == escape(self.provisioning_failure_err_description)
+        generated_json = json.loads(generated_health_document.decode("utf-8"))
+        assert generated_json["state"] == self.provisioning_not_ready_status
+        assert "details" in generated_json
+        assert generated_json["details"]["subStatus"] == self.provisioning_failure_substatus
+        assert generated_json["details"]["description"] == self.provisioning_failure_err_description
 
     def test_send_ready_signal_calls_build_report(self):
         with mock.patch.object(
@@ -787,9 +668,6 @@ class TestGoalStateHealthReporter:
             assert 1 == m_build_report.call_count
             assert (
                 mock.call(
-                    incarnation=self.default_parameters["incarnation"],
-                    container_id=self.default_parameters["container_id"],
-                    instance_id=self.default_parameters["instance_id"],
                     status=self.provisioning_success_status,
                 )
                 == m_build_report.call_args
@@ -811,9 +689,6 @@ class TestGoalStateHealthReporter:
             assert 1 == m_build_report.call_count
             assert (
                 mock.call(
-                    incarnation=self.default_parameters["incarnation"],
-                    container_id=self.default_parameters["container_id"],
-                    instance_id=self.default_parameters["instance_id"],
                     status=self.provisioning_not_ready_status,
                     substatus=self.provisioning_failure_substatus,
                     description=self.provisioning_failure_err_description,
@@ -822,25 +697,14 @@ class TestGoalStateHealthReporter:
             )
 
     def test_build_report_escapes_chars(self):
-        incarnation = "jd8'9*&^<'A><A[p&o+\"SD()*&&&LKAJSD23"
-        container_id = "&&<\"><><ds8'9+7&d9a86!@($09asdl;<>"
-        instance_id = "Opo>>>jas'&d;[p&fp\"a<<!!@&&"
         health_status = "&<897\"6&>&aa'sd!@&!)((*<&>"
         health_substatus = "&as\"d<<a&s>d<'^@!5&6<7"
         health_description = '&&&>!#$"&&<as\'1!@$d&>><>&"sd<67<]>>'
 
-        health_detail_subsection = (
-            self._get_formatted_health_detail_subsection_xml_string(
-                health_substatus=escape(health_substatus),
-                health_description=escape(health_description),
-            )
-        )
-        health_document = get_formatted_health_report_xml_bytes(
-            incarnation=escape(incarnation),
-            container_id=escape(container_id),
-            instance_id=escape(instance_id),
-            health_status=escape(health_status),
-            health_detail_subsection=health_detail_subsection,
+        health_document = get_formatted_health_report_with_details_json_bytes(
+            health_status=health_status,
+            health_substatus=health_substatus,
+            health_description=health_description,
         )
 
         reporter = azure_helper.GoalStateHealthReporter(
@@ -849,9 +713,6 @@ class TestGoalStateHealthReporter:
             self.test_azure_endpoint,
         )
         generated_health_document = reporter.build_report(
-            incarnation=incarnation,
-            container_id=container_id,
-            instance_id=instance_id,
             status=health_status,
             substatus=health_substatus,
             description=health_description,
@@ -867,21 +728,15 @@ class TestGoalStateHealthReporter:
         )
         long_err_msg = "a9&ea8>>>e as1< d\"q2*&(^%'a=5<" * 100
         generated_health_document = reporter.build_report(
-            incarnation=self.default_parameters["incarnation"],
-            container_id=self.default_parameters["container_id"],
-            instance_id=self.default_parameters["instance_id"],
             status=self.provisioning_not_ready_status,
             substatus=self.provisioning_failure_substatus,
             description=long_err_msg,
         )
 
-        generated_xroot = ET.fromstring(generated_health_document)
-        generated_health_report_description = self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/Details/Description",
-        )
+        generated_json = json.loads(generated_health_document.decode("utf-8"))
+        generated_health_report_description = generated_json["details"]["description"]
         assert (
-            len(unescape(generated_health_report_description))
+            len(generated_health_report_description)
             == HEALTH_REPORT_DESCRIPTION_TRIM_LEN
         )
 
@@ -896,13 +751,13 @@ class TestGoalStateHealthReporter:
         '         &apos;
         &         &amp;
 
-        We (step 1) trim the health report XML's description field,
-        and then (step 2) XML-escape the health report XML's description field.
+        We (step 1) trim the health report JSON's description field,
+        and then (step 2) XML-escape the health report JSON's description field.
 
-        The health report XML's description field limit within cloud-init
+        The health report JSON's description field limit within cloud-init
         is HEALTH_REPORT_DESCRIPTION_TRIM_LEN.
 
-        The Azure platform's limit on the health report XML's description field
+        The Azure platform's limit on the health report JSON's description field
         is 4096 chars.
 
         For worst-case chars, there is a 5x blowup in length
@@ -910,7 +765,7 @@ class TestGoalStateHealthReporter:
         ' and " when XML-escaped have a 5x blowup.
 
         Ensure that (1) trimming and then (2) XML-escaping does not blow past
-        the Azure platform's limit for health report XML's description field
+        the Azure platform's limit for health report JSON's description field
         (4096 chars).
         """
         reporter = azure_helper.GoalStateHealthReporter(
@@ -920,21 +775,13 @@ class TestGoalStateHealthReporter:
         )
         long_err_msg = "'\"" * 10000
         generated_health_document = reporter.build_report(
-            incarnation=self.default_parameters["incarnation"],
-            container_id=self.default_parameters["container_id"],
-            instance_id=self.default_parameters["instance_id"],
             status=self.provisioning_not_ready_status,
             substatus=self.provisioning_failure_substatus,
             description=long_err_msg,
         )
 
-        generated_xroot = ET.fromstring(generated_health_document)
-        generated_health_report_description = self._text_from_xpath_in_xroot(
-            generated_xroot,
-            "./Container/RoleInstanceList/Role/Health/Details/Description",
-        )
-        # The escaped description string should be less than
-        # the Azure platform limit for the escaped description string.
+        generated_json = json.loads(generated_health_document.decode("utf-8"))
+        generated_health_report_description = generated_json["details"]["description"]
         assert len(generated_health_report_description) <= 4096
 
 
@@ -1046,7 +893,7 @@ class TestWALinuxAgentShim:
     def test_correct_url_used_for_report_ready(self):
         shim = wa_shim(endpoint="test_endpoint")
         shim.register_with_azure_and_fetch_data(distro=None)
-        expected_url = "http://test_endpoint/machine?comp=health"
+        expected_url = "http://test_endpoint/provisioning/health"
         assert [
             mock.call(expected_url, data=mock.ANY, extra_headers=mock.ANY)
         ] == self.AzureEndpointHttpClient.return_value.post.call_args_list
@@ -1054,7 +901,7 @@ class TestWALinuxAgentShim:
     def test_correct_url_used_for_report_failure(self):
         shim = wa_shim(endpoint="test_endpoint")
         shim.register_with_azure_and_report_failure(description="TestDesc")
-        expected_url = "http://test_endpoint/machine?comp=health"
+        expected_url = "http://test_endpoint/provisioning/health"
         assert [
             mock.call(expected_url, data=mock.ANY, extra_headers=mock.ANY)
         ] == self.AzureEndpointHttpClient.return_value.post.call_args_list
@@ -1065,9 +912,8 @@ class TestWALinuxAgentShim:
         posted_document = (
             self.AzureEndpointHttpClient.return_value.post.call_args[1]["data"]
         )
-        assert self.test_incarnation.encode("utf-8") in posted_document
-        assert self.test_container_id.encode("utf-8") in posted_document
-        assert self.test_instance_id.encode("utf-8") in posted_document
+        posted_json = json.loads(posted_document.decode("utf-8"))
+        assert posted_json["state"] == "Ready"
 
     def test_goal_state_values_used_for_report_failure(self):
         shim = wa_shim(endpoint="test_endpoint")
@@ -1075,39 +921,28 @@ class TestWALinuxAgentShim:
         posted_document = (
             self.AzureEndpointHttpClient.return_value.post.call_args[1]["data"]
         )
-        assert self.test_incarnation.encode("utf-8") in posted_document
-        assert self.test_container_id.encode("utf-8") in posted_document
-        assert self.test_instance_id.encode("utf-8") in posted_document
+        posted_json = json.loads(posted_document.decode("utf-8"))
+        assert posted_json["state"] == "NotReady"
+        assert posted_json["details"]["description"] == "TestDesc"
 
-    def test_xml_elems_in_report_ready_post(self):
+    def test_json_elems_in_report_ready_post(self):
         shim = wa_shim(endpoint="test_endpoint")
         shim.register_with_azure_and_fetch_data(distro=None)
-        health_document = get_formatted_health_report_xml_bytes(
-            incarnation=escape(self.test_incarnation),
-            container_id=escape(self.test_container_id),
-            instance_id=escape(self.test_instance_id),
-            health_status=escape("Ready"),
-            health_detail_subsection="",
+        health_document = get_formatted_health_report_json_bytes(
+            health_status="Ready",
         )
         posted_document = (
             self.AzureEndpointHttpClient.return_value.post.call_args[1]["data"]
         )
         assert health_document == posted_document
 
-    def test_xml_elems_in_report_failure_post(self):
+    def test_json_elems_in_report_failure_post(self):
         shim = wa_shim(endpoint="test_endpoint")
         shim.register_with_azure_and_report_failure(description="TestDesc")
-        health_document = get_formatted_health_report_xml_bytes(
-            incarnation=escape(self.test_incarnation),
-            container_id=escape(self.test_container_id),
-            instance_id=escape(self.test_instance_id),
-            health_status=escape("NotReady"),
-            health_detail_subsection=(
-                HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE.format(
-                    health_substatus=escape("ProvisioningFailed"),
-                    health_description=escape("TestDesc"),
-                )
-            ),
+        health_document = get_formatted_health_report_with_details_json_bytes(
+            health_status="NotReady",
+            health_substatus="ProvisioningFailed",
+            health_description="TestDesc",
         )
         posted_document = (
             self.AzureEndpointHttpClient.return_value.post.call_args[1]["data"]

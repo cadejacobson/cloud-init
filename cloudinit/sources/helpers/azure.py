@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from time import sleep, time
 from typing import Callable, List, Optional, TypeVar, Union
 from xml.etree import ElementTree as ET  # nosec B405
-from xml.sax.saxutils import escape  # nosec B406
 
 from cloudinit import distros, subp, temp_utils, url_helper, util, version
 from cloudinit.reporting import events
@@ -556,24 +555,6 @@ class OpenSSLManager:
 
 
 class GoalStateHealthReporter:
-    HEALTH_REPORT_JSON_TEMPLATE = textwrap.dedent(
-        """\
-        {
-            "state": "{health_status}",
-            {health_detail_subsection}
-        }
-        """
-    )
-
-    HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE = textwrap.dedent(
-        """\
-        "details": {
-            "subStatus":  "{health_substatus}",
-            "description": "{health_description}"
-        }
-        """
-    )
-
     PROVISIONING_SUCCESS_STATUS = "Ready"
     PROVISIONING_NOT_READY_STATUS = "NotReady"
     PROVISIONING_FAILURE_SUBSTATUS = "ProvisioningFailed"
@@ -640,21 +621,15 @@ class GoalStateHealthReporter:
         substatus=None,
         description=None,
     ) -> bytes:
-        health_detail = ""
+        health_report = {"state": status}
+
         if substatus is not None:
-            health_detail = self.HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE.format(
-                health_substatus=escape(substatus),
-                health_description=escape(
-                    description[: self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
-                ),
-            )
+            health_report["details"] = {
+                "subStatus": substatus,
+                "description": description[:self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
+            }
 
-        health_report = self.HEALTH_REPORT_JSON_TEMPLATE.format(
-            health_status=escape(status),
-            health_detail_subsection=health_detail,
-        )
-
-        return health_report.encode("utf-8")
+        return json.dumps(health_report).encode("utf-8")
 
     @azure_ds_telemetry_reporter
     def _post_health_report(self, document: bytes) -> None:
