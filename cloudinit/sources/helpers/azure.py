@@ -574,37 +574,6 @@ class GoalStateHealthReporter:
         """
     )
 
-    HEALTH_REPORT_XML_TEMPLATE = textwrap.dedent(
-        """\
-        <?xml version="1.0" encoding="utf-8"?>
-        <Health xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-          <GoalStateIncarnation>{incarnation}</GoalStateIncarnation>
-          <Container>
-            <ContainerId>{container_id}</ContainerId>
-            <RoleInstanceList>
-              <Role>
-                <InstanceId>{instance_id}</InstanceId>
-                <Health>
-                  <State>{health_status}</State>
-                  {health_detail_subsection}
-                </Health>
-              </Role>
-            </RoleInstanceList>
-          </Container>
-        </Health>
-        """
-    )
-
-    HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE = textwrap.dedent(
-        """\
-        <Details>
-          <SubStatus>{health_substatus}</SubStatus>
-          <Description>{health_description}</Description>
-        </Details>
-        """
-    )
-
     PROVISIONING_SUCCESS_STATUS = "Ready"
     PROVISIONING_NOT_READY_STATUS = "NotReady"
     PROVISIONING_FAILURE_SUBSTATUS = "ProvisioningFailed"
