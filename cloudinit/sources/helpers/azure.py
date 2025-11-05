@@ -556,6 +556,24 @@ class OpenSSLManager:
 
 
 class GoalStateHealthReporter:
+    HEALTH_REPORT_JSON_TEMPLATE = textwrap.dedent(
+        """\
+        {
+            "state": "{health_status}",
+            {health_detail_subsection}
+        }
+        """
+    )
+
+    HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE = textwrap.dedent(
+        """\
+        "details": {
+            "subStatus":  "{health_substatus}",
+            "description": "{health_description}"
+        }
+        """
+    )
+
     HEALTH_REPORT_XML_TEMPLATE = textwrap.dedent(
         """\
         <?xml version="1.0" encoding="utf-8"?>
@@ -664,12 +682,24 @@ class GoalStateHealthReporter:
     ) -> bytes:
         health_detail = ""
         if substatus is not None:
+            health_detail_JSON = self.HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE.format(
+                health_substatus=escape(substatus),
+                health_description=escape(
+                    description[: self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
+                ),
+            )
+
             health_detail = self.HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE.format(
                 health_substatus=escape(substatus),
                 health_description=escape(
                     description[: self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
                 ),
             )
+
+        health_report_JSON = self.HEALTH_REPORT_JSON_TEMPLATE.format(
+            health_status=escape(status),
+            health_detail_subsection=health_detail_JSON,
+        )
 
         health_report = self.HEALTH_REPORT_XML_TEMPLATE.format(
             incarnation=escape(str(incarnation)),
@@ -678,6 +708,8 @@ class GoalStateHealthReporter:
             health_status=escape(status),
             health_detail_subsection=health_detail,
         )
+
+        LOG.info(f"JSON Based Health Report! {health_report_JSON}")
 
         return health_report.encode("utf-8")
 
