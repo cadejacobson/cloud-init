@@ -635,9 +635,6 @@ class GoalStateHealthReporter:
     @azure_ds_telemetry_reporter
     def send_ready_signal(self) -> None:
         document = self.build_report(
-            incarnation=self._goal_state.incarnation,
-            container_id=self._goal_state.container_id,
-            instance_id=self._goal_state.instance_id,
             status=self.PROVISIONING_SUCCESS_STATUS,
         )
         LOG.debug("Reporting ready to Azure fabric.")
@@ -655,9 +652,6 @@ class GoalStateHealthReporter:
     @azure_ds_telemetry_reporter
     def send_failure_signal(self, description: str) -> None:
         document = self.build_report(
-            incarnation=self._goal_state.incarnation,
-            container_id=self._goal_state.container_id,
-            instance_id=self._goal_state.instance_id,
             status=self.PROVISIONING_NOT_READY_STATUS,
             substatus=self.PROVISIONING_FAILURE_SUBSTATUS,
             description=description,
@@ -673,43 +667,23 @@ class GoalStateHealthReporter:
 
     def build_report(
         self,
-        incarnation: str,
-        container_id: str,
-        instance_id: str,
         status: str,
         substatus=None,
         description=None,
     ) -> bytes:
         health_detail = ""
         if substatus is not None:
-            health_detail_JSON = self.HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE.format(
+            health_detail = self.HEALTH_DETAIL_SUBSECTION_JSON_TEMPLATE.format(
                 health_substatus=escape(substatus),
                 health_description=escape(
                     description[: self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
                 ),
             )
 
-            health_detail = self.HEALTH_DETAIL_SUBSECTION_XML_TEMPLATE.format(
-                health_substatus=escape(substatus),
-                health_description=escape(
-                    description[: self.HEALTH_REPORT_DESCRIPTION_TRIM_LEN]
-                ),
-            )
-
-        health_report_JSON = self.HEALTH_REPORT_JSON_TEMPLATE.format(
-            health_status=escape(status),
-            health_detail_subsection=health_detail_JSON,
-        )
-
-        health_report = self.HEALTH_REPORT_XML_TEMPLATE.format(
-            incarnation=escape(str(incarnation)),
-            container_id=escape(container_id),
-            instance_id=escape(instance_id),
+        health_report = self.HEALTH_REPORT_JSON_TEMPLATE.format(
             health_status=escape(status),
             health_detail_subsection=health_detail,
         )
-
-        LOG.info(f"JSON Based Health Report! {health_report_JSON}")
 
         return health_report.encode("utf-8")
 
@@ -736,11 +710,11 @@ class GoalStateHealthReporter:
         sleep(0)
 
         LOG.debug("Sending health report to Azure fabric.")
-        url = "http://{}/machine?comp=health".format(self._endpoint)
+        url = "http://{}/provisioning/health".format(self._endpoint)
         self._azure_endpoint_client.post(
             url,
             data=document,
-            extra_headers={"Content-Type": "text/xml; charset=utf-8"},
+            extra_headers={"Content-Type": "application/json; charset=utf-8"},
         )
         LOG.debug("Successfully sent health report to Azure fabric")
 
