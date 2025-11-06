@@ -582,7 +582,7 @@ class TestGoalStateHealthReporter:
         self.post = mocker.patch.object(
             azure_helper.AzureEndpointHttpClient, "post"
         )
-        self.GoalState = mocker.patch.object(azure_helper, "GoalState")
+        self.GoalState = mocker.patch.object(wireserver, "GoalState")
         self.GoalState.return_value.container_id = self.default_parameters[
             "container_id"
         ]
@@ -943,13 +943,13 @@ class TestWALinuxAgentShim:
     @pytest.fixture(autouse=True)
     def fixtures(self, mocker):
         self.AzureEndpointHttpClient = mocker.patch.object(
-            azure_helper, "AzureEndpointHttpClient"
+            wireserver, "AzureEndpointHttpClient"
         )
-        self.GoalState = mocker.patch.object(azure_helper, "GoalState")
+        self.GoalState = mocker.patch.object(wireserver, "GoalState")
         self.OpenSSLManager = mocker.patch.object(
-            azure_helper, "OpenSSLManager", autospec=True
+            wireserver, "OpenSSLManager", autospec=True
         )
-        mocker.patch.object(azure_helper, "sleep", mock.MagicMock())
+        mocker.patch.object(wireserver, "sleep", mock.MagicMock())
 
         self.test_incarnation = "TestIncarnation"
         self.test_container_id = "TestContainerId"
@@ -1115,7 +1115,7 @@ class TestWALinuxAgentShim:
         )
         assert health_document == posted_document
 
-    @mock.patch.object(azure_helper, "GoalStateHealthReporter", autospec=True)
+    @mock.patch.object(wireserver, "GoalStateHealthReporter", autospec=True)
     def test_register_with_azure_and_fetch_data_calls_send_ready_signal(
         self, m_goal_state_health_reporter
     ):
@@ -1126,7 +1126,7 @@ class TestWALinuxAgentShim:
             == m_goal_state_health_reporter.return_value.send_ready_signal.call_count  # noqa: E501
         )
 
-    @mock.patch.object(azure_helper, "GoalStateHealthReporter", autospec=True)
+    @mock.patch.object(wireserver, "GoalStateHealthReporter", autospec=True)
     def test_register_with_azure_and_report_failure_calls_send_failure_signal(
         self, m_goal_state_health_reporter
     ):
@@ -1227,10 +1227,10 @@ class TestWALinuxAgentShim:
 class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
     @pytest.fixture(autouse=True)
     def fixtures(self, mocker):
-        self.m_shim = mocker.patch.object(azure_helper, "WALinuxAgentShim")
+        self.m_shim = mocker.patch.object(wireserver, "WALinuxAgentShim")
 
     def test_data_from_shim_returned(self):
-        ret = azure_helper.get_metadata_from_fabric(
+        ret = wireserver.get_metadata_from_fabric(
             distro=None, endpoint="test_endpoint"
         )
         assert (
@@ -1239,7 +1239,7 @@ class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
         )
 
     def test_success_calls_clean_up(self):
-        azure_helper.get_metadata_from_fabric(
+        wireserver.get_metadata_from_fabric(
             distro=None, endpoint="test_endpoint"
         )
         assert 1 == self.m_shim.return_value.clean_up.call_count
@@ -1249,7 +1249,7 @@ class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
             "retry", code=404
         )
         with pytest.raises(url_helper.UrlError):
-            azure_helper.get_metadata_from_fabric(
+            wireserver.get_metadata_from_fabric(
                 "test_endpoint",
                 None,
             )
@@ -1257,7 +1257,7 @@ class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
 
     def test_calls_shim_register_with_azure_and_fetch_data(self):
         m_pubkey_info = mock.MagicMock()
-        azure_helper.get_metadata_from_fabric(
+        wireserver.get_metadata_from_fabric(
             endpoint="test_endpoint",
             distro=None,
             pubkey_info=m_pubkey_info,
@@ -1275,7 +1275,7 @@ class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
         )
 
     def test_instantiates_shim_with_kwargs(self):
-        azure_helper.get_metadata_from_fabric(
+        wireserver.get_metadata_from_fabric(
             endpoint="test_endpoint", distro=None
         )
         assert 1 == self.m_shim.call_count
@@ -1285,10 +1285,10 @@ class TestGetMetadataGoalStateXMLAndReportReadyToFabric:
 class TestGetMetadataGoalStateXMLAndReportFailureToFabric:
     @pytest.fixture(autouse=True)
     def fixtures(self, mocker):
-        self.m_shim = mocker.patch.object(azure_helper, "WALinuxAgentShim")
+        self.m_shim = mocker.patch.object(wireserver, "WALinuxAgentShim")
 
     def test_success_calls_clean_up(self):
-        azure_helper.report_failure_to_fabric(
+        wireserver.report_failure_to_fabric(
             endpoint="test_endpoint", encoded_report="test"
         )
         assert 1 == self.m_shim.return_value.clean_up.call_count
@@ -1300,7 +1300,7 @@ class TestGetMetadataGoalStateXMLAndReportFailureToFabric:
             SentinelException
         )
         with pytest.raises(SentinelException):
-            azure_helper.report_failure_to_fabric(
+            wireserver.report_failure_to_fabric(
                 "test_endpoint",
                 encoded_report="test-report",
             )
@@ -1309,7 +1309,7 @@ class TestGetMetadataGoalStateXMLAndReportFailureToFabric:
     def test_report_failure_to_fabric_calls_shim_report_failure(
         self,
     ):
-        azure_helper.report_failure_to_fabric(
+        wireserver.report_failure_to_fabric(
             endpoint="test_endpoint",
             encoded_report="test",
         )
@@ -1320,7 +1320,7 @@ class TestGetMetadataGoalStateXMLAndReportFailureToFabric:
         )
 
     def test_instantiates_shim_with_kwargs(self):
-        azure_helper.report_failure_to_fabric(
+        wireserver.report_failure_to_fabric(
             endpoint="test_endpoint",
             encoded_report="test",
         )
