@@ -15,8 +15,8 @@ import requests
 from cloudinit import url_helper
 from cloudinit.net import dhcp
 from cloudinit.sources.azure import errors
+from cloudinit.sources.azure.wireserver import WALinuxAgentShim as wa_shim
 from cloudinit.sources.helpers import azure as azure_helper
-from cloudinit.sources.helpers.azure import WALinuxAgentShim as wa_shim
 from cloudinit.util import load_text_file
 from tests.unittests.sources.test_azure import construct_ovf_env
 from tests.unittests.util import MockDistro
@@ -234,19 +234,19 @@ class TestGoalStateParsing:
     def test_missing_container_id_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<ContainerId>.*</ContainerId>", "", xml)
-        with pytest.raises(azure_helper.InvalidGoalStateXMLException):
+        with pytest.raises(errors.InvalidGoalStateXMLException):
             azure_helper.GoalState(xml, mock.MagicMock())
 
     def test_missing_instance_id_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<InstanceId>.*</InstanceId>", "", xml)
-        with pytest.raises(azure_helper.InvalidGoalStateXMLException):
+        with pytest.raises(errors.InvalidGoalStateXMLException):
             azure_helper.GoalState(xml, mock.MagicMock())
 
     def test_missing_incarnation_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<Incarnation>.*</Incarnation>", "", xml)
-        with pytest.raises(azure_helper.InvalidGoalStateXMLException):
+        with pytest.raises(errors.InvalidGoalStateXMLException):
             azure_helper.GoalState(xml, mock.MagicMock())
 
 

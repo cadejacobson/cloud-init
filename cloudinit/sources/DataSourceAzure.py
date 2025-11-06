@@ -33,20 +33,22 @@ from cloudinit.reporting import events
 from cloudinit.sources.azure import errors, identity, imds, kvp
 from cloudinit.sources.helpers import netlink
 from cloudinit.sources.helpers.azure import (
-    DEFAULT_WIRESERVER_ENDPOINT,
     NonAzureDataSource,
     OvfEnvXml,
     azure_ds_reporter,
     azure_ds_telemetry_reporter,
     build_minimal_ovf,
-    dhcp_log_cb,
     get_boot_telemetry,
-    get_metadata_from_fabric,
     get_system_info,
     report_diagnostic_event,
     report_dmesg_to_kvp,
-    report_failure_to_fabric,
 )
+from cloudinit.sources.azure.wireserver import (
+    DEFAULT_WIRESERVER_ENDPOINT,
+    get_metadata_from_fabric,
+    report_failure_to_fabric,
+    dhcp_log_cb
+    )
 from cloudinit.url_helper import UrlError
 
 try:
