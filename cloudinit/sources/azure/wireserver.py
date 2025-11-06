@@ -4,23 +4,25 @@ import logging
 import textwrap
 from time import sleep
 from typing import List, Optional, Union
+from xml.etree import ElementTree as ET  # nosec B405
+from xml.sax.saxutils import escape  # nosec B406
 
 from cloudinit import distros
 from cloudinit.reporting import events
 from cloudinit.sources.azure.errors import InvalidGoalStateXMLException
 from cloudinit.sources.helpers.azure import (
+    AzureEndpointHttpClient,
+    OpenSSLManager,
     azure_ds_reporter,
     azure_ds_telemetry_reporter,
     report_diagnostic_event,
-    AzureEndpointHttpClient,
-    OpenSSLManager)
-from xml.etree import ElementTree as ET  # nosec B405
-from xml.sax.saxutils import escape  # nosec B406
+)
 
 LOG = logging.getLogger(__name__)
 
 # Default Wireserver endpoint (if not found in DHCP option 245).
 DEFAULT_WIRESERVER_ENDPOINT = "168.63.129.16"
+
 
 class GoalState:
     def __init__(
@@ -241,6 +243,7 @@ class GoalStateHealthReporter:
             extra_headers={"Content-Type": "text/xml; charset=utf-8"},
         )
         LOG.debug("Successfully sent health report to Azure fabric")
+
 
 class WALinuxAgentShim:
     def __init__(self, endpoint: str):

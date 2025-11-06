@@ -219,5 +219,6 @@ class ReportableErrorVmIdentification(ReportableError):
         self.supporting_data["exception"] = repr(exception)
         self.supporting_data["system_uuid"] = system_uuid
 
+
 class InvalidGoalStateXMLException(Exception):
     """Raised when GoalState XML is invalid or has missing data."""

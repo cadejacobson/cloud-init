@@ -14,10 +14,9 @@ import requests
 
 from cloudinit import url_helper
 from cloudinit.net import dhcp
-from cloudinit.sources.azure import errors
+from cloudinit.sources.azure import errors, wireserver
 from cloudinit.sources.azure.wireserver import WALinuxAgentShim as wa_shim
 from cloudinit.sources.helpers import azure as azure_helper
-from cloudinit.sources.azure import wireserver
 from cloudinit.util import load_text_file
 from tests.unittests.sources.test_azure import construct_ovf_env
 from tests.unittests.util import MockDistro

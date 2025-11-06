@@ -31,6 +31,12 @@ from cloudinit.net.dhcp import (
 from cloudinit.net.ephemeral import EphemeralDHCPv4, EphemeralIPv4Network
 from cloudinit.reporting import events
 from cloudinit.sources.azure import errors, identity, imds, kvp
+from cloudinit.sources.azure.wireserver import (
+    DEFAULT_WIRESERVER_ENDPOINT,
+    dhcp_log_cb,
+    get_metadata_from_fabric,
+    report_failure_to_fabric,
+)
 from cloudinit.sources.helpers import netlink
 from cloudinit.sources.helpers.azure import (
     NonAzureDataSource,
@@ -43,12 +49,6 @@ from cloudinit.sources.helpers.azure import (
     report_diagnostic_event,
     report_dmesg_to_kvp,
 )
-from cloudinit.sources.azure.wireserver import (
-    DEFAULT_WIRESERVER_ENDPOINT,
-    get_metadata_from_fabric,
-    report_failure_to_fabric,
-    dhcp_log_cb
-    )
 from cloudinit.url_helper import UrlError
 
 try:
