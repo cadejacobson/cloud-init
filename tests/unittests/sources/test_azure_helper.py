@@ -17,6 +17,7 @@ from cloudinit.net import dhcp
 from cloudinit.sources.azure import errors
 from cloudinit.sources.azure.wireserver import WALinuxAgentShim as wa_shim
 from cloudinit.sources.helpers import azure as azure_helper
+from cloudinit.sources.azure import wireserver
 from cloudinit.util import load_text_file
 from tests.unittests.sources.test_azure import construct_ovf_env
 from tests.unittests.util import MockDistro
@@ -183,7 +184,7 @@ class TestGoalStateParsing:
         if m_azure_endpoint_client is None:
             m_azure_endpoint_client = mock.MagicMock()
         xml = self._get_formatted_goal_state_xml_string(**kwargs)
-        return azure_helper.GoalState(xml, m_azure_endpoint_client)
+        return wireserver.GoalState(xml, m_azure_endpoint_client)
 
     def test_incarnation_parsed_correctly(self):
         incarnation = "123"
@@ -229,25 +230,25 @@ class TestGoalStateParsing:
     def test_invalid_goal_state_xml_raises_parse_error(self):
         xml = "random non-xml data"
         with pytest.raises(ET.ParseError):
-            azure_helper.GoalState(xml, mock.MagicMock())
+            wireserver.GoalState(xml, mock.MagicMock())
 
     def test_missing_container_id_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<ContainerId>.*</ContainerId>", "", xml)
         with pytest.raises(errors.InvalidGoalStateXMLException):
-            azure_helper.GoalState(xml, mock.MagicMock())
+            wireserver.GoalState(xml, mock.MagicMock())
 
     def test_missing_instance_id_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<InstanceId>.*</InstanceId>", "", xml)
         with pytest.raises(errors.InvalidGoalStateXMLException):
-            azure_helper.GoalState(xml, mock.MagicMock())
+            wireserver.GoalState(xml, mock.MagicMock())
 
     def test_missing_incarnation_in_goal_state_xml_raises_exc(self):
         xml = self._get_formatted_goal_state_xml_string()
         xml = re.sub("<Incarnation>.*</Incarnation>", "", xml)
         with pytest.raises(errors.InvalidGoalStateXMLException):
-            azure_helper.GoalState(xml, mock.MagicMock())
+            wireserver.GoalState(xml, mock.MagicMock())
 
 
 @mock.patch("cloudinit.sources.helpers.azure.http_with_retries")
@@ -630,11 +631,11 @@ class TestGoalStateHealthReporter:
 
     def test_send_ready_signal_sends_post_request(self):
         with mock.patch.object(
-            azure_helper.GoalStateHealthReporter, "build_report"
+            wireserver.GoalStateHealthReporter, "build_report"
         ) as m_build_report:
             client = azure_helper.AzureEndpointHttpClient(mock.MagicMock())
-            reporter = azure_helper.GoalStateHealthReporter(
-                azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+            reporter = wireserver.GoalStateHealthReporter(
+                wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
                 client,
                 self.test_azure_endpoint,
             )
@@ -652,11 +653,11 @@ class TestGoalStateHealthReporter:
 
     def test_send_failure_signal_sends_post_request(self):
         with mock.patch.object(
-            azure_helper.GoalStateHealthReporter, "build_report"
+            wireserver.GoalStateHealthReporter, "build_report"
         ) as m_build_report:
             client = azure_helper.AzureEndpointHttpClient(mock.MagicMock())
-            reporter = azure_helper.GoalStateHealthReporter(
-                azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+            reporter = wireserver.GoalStateHealthReporter(
+                wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
                 client,
                 self.test_azure_endpoint,
             )
@@ -676,8 +677,8 @@ class TestGoalStateHealthReporter:
 
     def test_build_report_for_ready_signal_health_document(self):
         health_document = self._get_report_ready_health_document()
-        reporter = azure_helper.GoalStateHealthReporter(
-            azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+        reporter = wireserver.GoalStateHealthReporter(
+            wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
             azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
             self.test_azure_endpoint,
         )
@@ -728,8 +729,8 @@ class TestGoalStateHealthReporter:
 
     def test_build_report_for_failure_signal_health_document(self):
         health_document = self._get_report_failure_health_document()
-        reporter = azure_helper.GoalStateHealthReporter(
-            azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+        reporter = wireserver.GoalStateHealthReporter(
+            wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
             azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
             self.test_azure_endpoint,
         )
@@ -775,10 +776,10 @@ class TestGoalStateHealthReporter:
 
     def test_send_ready_signal_calls_build_report(self):
         with mock.patch.object(
-            azure_helper.GoalStateHealthReporter, "build_report"
+            wireserver.GoalStateHealthReporter, "build_report"
         ) as m_build_report:
-            reporter = azure_helper.GoalStateHealthReporter(
-                azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+            reporter = wireserver.GoalStateHealthReporter(
+                wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
                 azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
                 self.test_azure_endpoint,
             )
@@ -797,10 +798,10 @@ class TestGoalStateHealthReporter:
 
     def test_send_failure_signal_calls_build_report(self):
         with mock.patch.object(
-            azure_helper.GoalStateHealthReporter, "build_report"
+            wireserver.GoalStateHealthReporter, "build_report"
         ) as m_build_report:
-            reporter = azure_helper.GoalStateHealthReporter(
-                azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+            reporter = wireserver.GoalStateHealthReporter(
+                wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
                 azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
                 self.test_azure_endpoint,
             )
@@ -843,8 +844,8 @@ class TestGoalStateHealthReporter:
             health_detail_subsection=health_detail_subsection,
         )
 
-        reporter = azure_helper.GoalStateHealthReporter(
-            azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+        reporter = wireserver.GoalStateHealthReporter(
+            wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
             azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
             self.test_azure_endpoint,
         )
@@ -860,8 +861,8 @@ class TestGoalStateHealthReporter:
         assert health_document == generated_health_document
 
     def test_build_report_conforms_to_length_limits(self):
-        reporter = azure_helper.GoalStateHealthReporter(
-            azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+        reporter = wireserver.GoalStateHealthReporter(
+            wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
             azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
             self.test_azure_endpoint,
         )
@@ -913,8 +914,8 @@ class TestGoalStateHealthReporter:
         the Azure platform's limit for health report XML's description field
         (4096 chars).
         """
-        reporter = azure_helper.GoalStateHealthReporter(
-            azure_helper.GoalState(mock.MagicMock(), mock.MagicMock()),
+        reporter = wireserver.GoalStateHealthReporter(
+            wireserver.GoalState(mock.MagicMock(), mock.MagicMock()),
             azure_helper.AzureEndpointHttpClient(mock.MagicMock()),
             self.test_azure_endpoint,
         )
