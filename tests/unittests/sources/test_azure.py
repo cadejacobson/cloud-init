@@ -1737,9 +1737,7 @@ scbus-1 on xpt0 bus 0
 
         assert "ssh_pwauth" not in dsrc.cfg
 
-    @pytest.mark.skipif(
-        passlib is None, reason="passlib not installed"
-    )
+    @pytest.mark.skipif(passlib is None, reason="passlib not installed")
     def test_password_given(self, get_ds, mocker):
         # The crypt module has platform-specific behavior and the purpose of
         # this test isn't to verify the differences between crypt and passlib,
@@ -5765,9 +5763,7 @@ class TestHashPassword:
 
             # Verify we got a valid SHA-512 hash from passlib
             assert result.startswith("$6$")
-            assert _passlib_hash.sha512_crypt.verify(
-                "testpassword", result
-            )
+            assert _passlib_hash.sha512_crypt.verify("testpassword", result)
         else:
             # passlib is not installed; mock it to return a known hash
             mock_passlib_hash = mock.MagicMock()
