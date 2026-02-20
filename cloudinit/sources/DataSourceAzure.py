@@ -10,6 +10,7 @@ import os
 import os.path
 import re
 import socket
+import warnings
 import xml.etree.ElementTree as ET  # nosec B405
 from enum import Enum
 from pathlib import Path
@@ -151,7 +152,9 @@ def hash_password(password: str) -> str:
     :raises ReportableErrorImportError: If crypt and passlib are unavailable.
     """
     try:
-        import crypt  # pylint: disable=W4901
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=DeprecationWarning)
+            import crypt  # pylint: disable=W4901
 
         salt = crypt.mksalt(crypt.METHOD_SHA512)
         return crypt.crypt(password, salt)
