@@ -5648,15 +5648,6 @@ class TestValidateIMDSMetadata:
 
         assert azure_ds.validate_imds_network_metadata(imds_md) is False
 
-
-class TestDependencyFallback:
-    def test_dependency_fallback(self):
-        """Ensure that crypt/passlib import failover gets exercised on all
-        Python versions
-        """
-        assert dsaz.hash_password("`")
-
-
 class TestQueryVmId:
     @mock.patch.object(
         identity, "query_system_uuid", side_effect=["test-system-uuid"]
@@ -5723,6 +5714,12 @@ class TestQueryVmId:
 
 class TestHashPassword:
     """Tests for the hash_password function."""
+
+    def test_dependency_fallback(self):
+        """Ensure that crypt/passlib import failover gets exercised on all
+        Python versions
+        """
+        assert dsaz.hash_password("`")
 
     def test_crypt_working(self):
         """Test that hash_password uses crypt when available."""
