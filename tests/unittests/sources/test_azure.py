@@ -5720,7 +5720,9 @@ class TestHashPassword:
         """Ensure that crypt/passlib import failover gets exercised on all
         Python versions
         """
-        assert dsaz.hash_password("`")
+        result = dsaz.hash_password("`")
+        assert result
+        assert result.startswith("$6$")
 
     def test_crypt_working(self):
         """Test that hash_password uses crypt when available."""
