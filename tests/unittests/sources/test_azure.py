@@ -5648,6 +5648,7 @@ class TestValidateIMDSMetadata:
 
         assert azure_ds.validate_imds_network_metadata(imds_md) is False
 
+
 class TestQueryVmId:
     @mock.patch.object(
         identity, "query_system_uuid", side_effect=["test-system-uuid"]
