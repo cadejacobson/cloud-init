@@ -27,7 +27,7 @@ lint:
 	@$(CWD)/tools/run-lint
 
 unittest: clean_pyc
-	$(PYTHON) -m pytest -v tests/unittests cloudinit
+	$(PYTHON) -m pytest -vv -s tests/unittests cloudinit
 
 render-template:
 	$(PYTHON) ./tools/render-template --variant=$(VARIANT) $(FILE) $(subst .tmpl,,$(FILE))

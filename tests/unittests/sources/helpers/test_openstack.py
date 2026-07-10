@@ -41,9 +41,9 @@ class TestConvertNetJson:
             "version": 1,
             "config": [
                 {
-                    "mac_address": "fa:16:3e:9c:bf:3d",
+                    "mac_address": None,
                     "mtu": None,
-                    "name": "eth0",
+                    "name": "tapcd9f6d46-4a",
                     "subnets": [{"type": "dhcp4"}],
                     "type": "physical",
                 },
@@ -90,9 +90,9 @@ class TestConvertNetJson:
             "version": 1,
             "config": [
                 {
-                    "mac_address": "fa:16:3e:9c:bf:3d",
+                    "mac_address": None,
                     "mtu": None,
-                    "name": "eth0",
+                    "name": "tapcd9f6d46-4a",
                     "subnets": [
                         {
                             "type": "static",

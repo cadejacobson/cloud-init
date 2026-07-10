@@ -731,16 +731,16 @@ class TestNetJson(CiTestCase):
             "version": 1,
             "config": [
                 {
-                    "mac_address": "fa:16:3e:69:b0:58",
+                    "mac_address": None,
                     "mtu": None,
-                    "name": "enp0s1",
+                    "name": "tap2ecc7709-b3",
                     "subnets": [{"type": "ipv6_dhcpv6-stateless"}],
                     "type": "physical",
                 },
                 {
-                    "mac_address": "fa:16:3e:d4:57:ad",
+                    "mac_address": None,
                     "mtu": None,
-                    "name": "enp0s2",
+                    "name": "tap2f88d109-5b",
                     "subnets": [{"type": "ipv6_dhcpv6-stateful"}],
                     "type": "physical",
                     "accept-ra": True,
@@ -792,15 +792,15 @@ class TestNetJson(CiTestCase):
                     {
                         "subnets": [{"type": "dhcp4"}],
                         "type": "physical",
-                        "mac_address": "fa:16:3e:69:b0:58",
-                        "name": "enp0s1",
+                        "mac_address": None,
+                        "name": "tap2ecc7709-b3",
                         "mtu": None,
                     },
                     {
                         "subnets": [{"type": "dhcp4"}],
                         "type": "physical",
-                        "mac_address": "fa:16:3e:d4:57:ad",
-                        "name": "enp0s2",
+                        "mac_address": None,
+                        "name": "tap2f88d109-5b",
                         "mtu": None,
                     },
                     {
@@ -824,8 +824,8 @@ class TestNetJson(CiTestCase):
                 "version": 1,
                 "config": [
                     {
-                        "name": "foo3",
-                        "mac_address": "fa:16:3e:ed:9a:59",
+                        "name": "tap1a81968a-79",
+                        "mac_address": None,
                         "mtu": None,
                         "type": "physical",
                         "subnets": [
@@ -877,7 +877,7 @@ class TestConvertNetworkData(CiTestCase):
 
     def test_conversion_fills_names(self):
         ncfg = openstack.convert_net_json(NETWORK_DATA, known_macs=KNOWN_MACS)
-        expected = set(["nic0", "enp0s1", "enp0s2"])
+        expected = set(["nic0", "tap2ecc7709-b3", "tap2f88d109-5b"])
         found = self._getnames_in_config(ncfg)
         self.assertEqual(found, expected)
 
@@ -890,18 +890,20 @@ class TestConvertNetworkData(CiTestCase):
         get_interfaces_by_mac.return_value = macs
 
         ncfg = openstack.convert_net_json(NETWORK_DATA)
-        expected = set(["nic0", "ens1", "enp0s2"])
+        expected = set(["nic0", "tap2ecc7709-b3", "tap2f88d109-5b"])
         found = self._getnames_in_config(ncfg)
         self.assertEqual(found, expected)
 
-    def test_convert_raises_value_error_on_missing_name(self):
-        macs = {"aa:aa:aa:aa:aa:00": "ens1"}
-        self.assertRaises(
-            ValueError,
-            openstack.convert_net_json,
-            NETWORK_DATA,
-            known_macs=macs,
-        )
+    # Commenting this function out since we have modified the code to always add
+    # a name irrespective of it is present in the link info or not.
+    # def test_convert_raises_value_error_on_missing_name(self):
+    #     macs = {"aa:aa:aa:aa:aa:00": "ens1"}
+    #     self.assertRaises(
+    #         ValueError,
+    #         openstack.convert_net_json,
+    #         NETWORK_DATA,
+    #         known_macs=macs,
+    #     )
 
     def test_conversion_with_route(self):
         ncfg = openstack.convert_net_json(
@@ -935,7 +937,7 @@ class TestConvertNetworkData(CiTestCase):
         for i in ncfg["config"]:
             if i.get("type") == "physical":
                 physicals.add(i["name"])
-        self.assertEqual(physicals, set(("foo1", "foo2")))
+        self.assertEqual(physicals, set(("tap77a0dc5b-72", "tap7d6b7bec-93")))
 
     def test_bond_conversion(self):
         # light testing of bond conversion and eni rendering of bond
@@ -961,24 +963,26 @@ class TestConvertNetworkData(CiTestCase):
             ]
         )
         self.assertEqual(
-            sorted(["oeth0", "oeth1", "bond0", "bond0.602", "bond0.612"]),
+            sorted(["eth0", "eth1", "bond0", "bond0.602", "bond0.612"]),
             interfaces,
         )
 
-        words = eni_rendering.split()
-        # 'eth0' and 'eth1' are the ids. because their mac adresses
-        # map to other names, we should not see them in the ENI
-        self.assertNotIn("eth0", words)
-        self.assertNotIn("eth1", words)
+        # Because we set the name to link["id"] if it is not encountered,
+        # we should see eth0 or eth1 in the eni rendering. Hence this check does not hold good.
+        # words = eni_rendering.split()
+        # self.assertNotIn("eth0", words)
+        # self.assertNotIn("eth1", words)
 
-        # oeth0 and oeth1 are the interface names for eni.
-        # bond0 will be generated for the bond. Each should be auto.
-        self.assertIn("auto oeth0", eni_rendering)
-        self.assertIn("auto oeth1", eni_rendering)
+        # We should be seeing eth0 and eth1 as the names for the physical interfaces
+        # as we have named them based on the link id and not on the known_macs.
+        self.assertIn("auto eth0", eni_rendering)
+        self.assertIn("auto eth1", eni_rendering)
         self.assertIn("auto bond0", eni_rendering)
-        # The bond should have the given mac address
-        pos = eni_rendering.find("auto bond0")
-        self.assertIn(BOND_MAC, eni_rendering[pos:])
+
+        # Since we are setting the mac address for all interfaces to none, we 
+        # are commenting the check down below.
+        # pos = eni_rendering.find("auto bond0")
+        # self.assertIn(BOND_MAC, eni_rendering[pos:])
 
     def test_vlan(self):
         # light testing of vlan config conversion and eni rendering
@@ -994,9 +998,9 @@ class TestConvertNetworkData(CiTestCase):
         ) as f:
             eni_rendering = f.read()
 
-        self.assertIn("iface enp0s1", eni_rendering)
+        self.assertIn("iface eth0", eni_rendering)
         self.assertIn("address 10.0.1.5", eni_rendering)
-        self.assertIn("auto enp0s1.602", eni_rendering)
+        self.assertIn("auto eth0.602", eni_rendering)
 
     def test_mac_addrs_can_be_upper_case(self):
         # input mac addresses on rackspace may be upper case
@@ -1012,8 +1016,8 @@ class TestConvertNetworkData(CiTestCase):
 
         expected = {
             "nic0": "fa:16:3e:05:30:fe",
-            "enp0s1": "fa:16:3e:69:b0:58",
-            "enp0s2": "fa:16:3e:d4:57:ad",
+            "tap2ecc7709-b3": None,
+            "tap2f88d109-5b": None,
         }
         self.assertEqual(expected, config_name2mac)
 
@@ -1031,8 +1035,8 @@ class TestConvertNetworkData(CiTestCase):
 
         expected = {
             "nic0": "fa:16:3e:05:30:fe",
-            "enp0s1": "fa:16:3e:69:b0:58",
-            "enp0s2": "fa:16:3e:d4:57:ad",
+            "tap2ecc7709-b3": None,
+            "tap2f88d109-5b": None,
         }
         self.assertEqual(expected, config_name2mac)
 
