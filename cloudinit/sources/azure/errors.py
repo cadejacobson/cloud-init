@@ -257,6 +257,19 @@ class ReportableErrorSecretsTool(ReportableError):
         self.supporting_data["stderr"] = exception.stderr
 
 
+class ReportableErrorSecretDecryptionFailure(ReportableError):
+    def __init__(
+        self, *, field: str, exception: subp.ProcessExecutionError
+    ) -> None:
+        super().__init__("failure to decrypt ovf-env.xml field=%s" % field)
+
+        # stdout is intentionally omitted: it is the plaintext secret and
+        # must never be surfaced in a report or log.
+        self.supporting_data["field"] = field
+        self.supporting_data["exit_code"] = exception.exit_code
+        self.supporting_data["stderr"] = exception.stderr
+
+
 class ReportableErrorVmIdentification(ReportableError):
     def __init__(
         self, *, exception: Exception, system_uuid: Optional[str] = None

@@ -322,3 +322,23 @@ def test_secrets_tool_failure():
     assert error.supporting_data["stderr"] == "boom"
     # stdout must never be surfaced (it may be a plaintext secret).
     assert "stdout" not in error.supporting_data
+
+
+def test_secret_decryption_failure():
+    exception = subp.ProcessExecutionError(
+        cmd=["azure-protected-secrets-tool", "unprotect-secret"],
+        exit_code=1,
+        stdout="super-secret-plaintext",
+        stderr="decryption failed",
+    )
+
+    error = errors.ReportableErrorSecretDecryptionFailure(
+        field="customData", exception=exception
+    )
+
+    assert error.reason == "failure to decrypt ovf-env.xml field=customData"
+    assert error.supporting_data["field"] == "customData"
+    assert error.supporting_data["exit_code"] == 1
+    assert error.supporting_data["stderr"] == "decryption failed"
+    # stdout must never be surfaced (it is the plaintext secret).
+    assert "stdout" not in error.supporting_data

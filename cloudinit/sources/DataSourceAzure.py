@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET  # nosec B405
 from enum import Enum
 from pathlib import Path
 from time import monotonic, sleep, time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -714,6 +714,20 @@ class DataSourceAzure(sources.DataSource):
         )
         return True
 
+    def _get_secret_decryptor(
+        self,
+    ) -> Optional[Callable[[str, str], str]]:
+        """Return a decryptor for ovf-env.xml secrets, or None.
+
+        On the CVM secrets-provisioning (v1) path, customData and
+        adminPassword in ovf-env.xml are encrypted and must be decrypted with
+        azure-protected-secrets-tool before the OVF config is applied. Off the
+        secrets path this returns None and the fields are read as-is.
+        """
+        if not self._secrets_provisioning_enabled:
+            return None
+        return cvm.unprotect_secret
+
     @azure_ds_telemetry_reporter
     def crawl_metadata(self):
         """Walk all instance metadata sources returning a dict on success.
@@ -751,21 +765,31 @@ class DataSourceAzure(sources.DataSource):
         userdata_raw = ""
         files = {}
 
+        # On the CVM secrets path, ovf-env.xml customData and adminPassword
+        # are encrypted; this decrypts them as the OVF is read. None off the
+        # secrets path, leaving the fields untouched.
+        secret_decryptor = self._get_secret_decryptor()
+
         for src in list_possible_azure_ds(self.seed_dir, ddir):
             try:
                 if src.startswith("/dev/"):
                     if util.is_FreeBSD():
                         md, userdata_raw, cfg, files = util.mount_cb(
-                            src, load_azure_ds_dir, mtype="udf"
+                            src,
+                            load_azure_ds_dir,
+                            data=secret_decryptor,
+                            mtype="udf",
                         )
                     else:
                         md, userdata_raw, cfg, files = util.mount_cb(
-                            src, load_azure_ds_dir
+                            src, load_azure_ds_dir, data=secret_decryptor
                         )
                     # save the device for ejection later
                     self._iso_dev = src
                 else:
-                    md, userdata_raw, cfg, files = load_azure_ds_dir(src)
+                    md, userdata_raw, cfg, files = load_azure_ds_dir(
+                        src, secret_decryptor
+                    )
 
                 self.seed = src
                 report_diagnostic_event(
@@ -1665,7 +1689,9 @@ class DataSourceAzure(sources.DataSource):
             description="read azure ovf during reprovisioning",
             parent=azure_ds_reporter,
         ):
-            md, ud, cfg = read_azure_ovf(contents)
+            md, ud, cfg = read_azure_ovf(
+                contents, decryptor=self._get_secret_decryptor()
+            )
             return (md, ud, cfg, {"ovf-env.xml": contents})
 
     @azure_ds_telemetry_reporter
@@ -2083,15 +2109,19 @@ def write_files(datadir, files, dirmode=None):
 
 
 @azure_ds_telemetry_reporter
-def read_azure_ovf(contents):
+def read_azure_ovf(contents, decryptor=None):
     """Parse OVF XML contents.
+
+    :param decryptor: optional callable ``(field, token) -> plaintext`` used
+        to decrypt the encrypted customData and adminPassword fields on the
+        CVM secrets-provisioning path. None off the secrets path.
 
     :return: Tuple of metadata, configuration, userdata dicts.
 
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
-    ovf_env = OvfEnvXml.parse_text(contents)
+    ovf_env = OvfEnvXml.parse_text(contents, decryptor=decryptor)
     md: Dict[str, Any] = {}
     cfg = {}
     ud = ovf_env.custom_data or ""
@@ -2195,7 +2225,7 @@ def list_possible_azure_ds(seed, cache_dir):
 
 
 @azure_ds_telemetry_reporter
-def load_azure_ds_dir(source_dir):
+def load_azure_ds_dir(source_dir, decryptor=None):
     ovf_file = os.path.join(source_dir, "ovf-env.xml")
 
     if not os.path.isfile(ovf_file):
@@ -2204,7 +2234,7 @@ def load_azure_ds_dir(source_dir):
     with performance.Timed("Reading ovf-env.xml"), open(ovf_file, "rb") as fp:
         contents = fp.read()
 
-    md, ud, cfg = read_azure_ovf(contents)
+    md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
     return (md, ud, cfg, {"ovf-env.xml": contents})
 
 

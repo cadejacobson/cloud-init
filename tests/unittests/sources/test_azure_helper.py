@@ -1,6 +1,7 @@
 # This file is part of cloud-init. See LICENSE file for license information.
 # pylint: disable=attribute-defined-outside-init
 
+import base64
 import os
 import re
 import shutil
@@ -1475,6 +1476,41 @@ class TestOvfEnvXml:
     )
     def test_valid_ovf_scenarios(self, ovf, expected):
         assert azure_helper.OvfEnvXml.parse_text(ovf) == expected
+
+    def test_decryptor_decrypts_custom_data_and_password(self):
+        """A decryptor decrypts customData (pre-b64decode) and password."""
+
+        def fake_decrypt(field, token):
+            return {
+                "customData": base64.b64encode(b"plain-userdata").decode(),
+                "adminPassword": "plain-password",
+            }[field]
+
+        decryptor = mock.Mock(side_effect=fake_decrypt)
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        )
+
+        instance = azure_helper.OvfEnvXml.parse_text(ovf, decryptor=decryptor)
+
+        assert instance.custom_data == b"plain-userdata"
+        assert instance.password == "plain-password"
+        assert decryptor.call_args_list == [
+            mock.call(
+                "customData",
+                base64.b64encode(b"encrypted-cd").decode(),
+            ),
+            mock.call("adminPassword", "encrypted-pw"),
+        ]
+
+    def test_no_decryptor_leaves_fields_unchanged(self):
+        """Without a decryptor, customData/password parse as before."""
+        ovf = construct_ovf_env(custom_data="hello", password="pw")
+
+        instance = azure_helper.OvfEnvXml.parse_text(ovf)
+
+        assert instance.custom_data == b"hello"
+        assert instance.password == "pw"
 
     @pytest.mark.parametrize(
         "ovf,error",

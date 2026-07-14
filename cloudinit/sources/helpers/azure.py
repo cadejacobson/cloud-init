@@ -1015,9 +1015,17 @@ class OvfEnvXml:
         return self.__dict__ == other.__dict__
 
     @classmethod
-    def parse_text(cls, ovf_env_xml: str) -> "OvfEnvXml":
+    def parse_text(
+        cls,
+        ovf_env_xml: str,
+        decryptor: Optional[Callable[[str, str], str]] = None,
+    ) -> "OvfEnvXml":
         """Parser for ovf-env.xml data.
 
+        :param decryptor: optional callable ``(field, token) -> plaintext``
+            used to decrypt the encrypted customData and adminPassword fields
+            when CVM secrets provisioning is enabled. When None (the default),
+            the fields are read as-is.
         :raises NonAzureDataSource: if XML is not in Azure's format.
         :raises errors.ReportableErrorOvfParsingException: if XML is
                 unparsable or invalid.
@@ -1034,7 +1042,7 @@ class OvfEnvXml:
             )
 
         instance = OvfEnvXml()
-        instance._parse_linux_configuration_set_section(root)
+        instance._parse_linux_configuration_set_section(root, decryptor)
         instance._parse_platform_settings_section(root)
 
         return instance
@@ -1100,7 +1108,7 @@ class OvfEnvXml:
 
         return value
 
-    def _parse_linux_configuration_set_section(self, root):
+    def _parse_linux_configuration_set_section(self, root, decryptor=None):
         provisioning_section = self._find(
             root, "ProvisioningSection", required=True
         )
@@ -1110,18 +1118,30 @@ class OvfEnvXml:
             required=True,
         )
 
-        self.custom_data = self._parse_property(
+        raw_custom_data = self._parse_property(
             config_set,
             "CustomData",
-            decode_base64=True,
             required=False,
         )
+        if raw_custom_data is None:
+            self.custom_data = None
+        else:
+            if decryptor is not None:
+                # Secrets provisioning: CustomData holds an encrypted JWT.
+                # Decrypt it before base64-decoding the plaintext payload.
+                raw_custom_data = decryptor("customData", raw_custom_data)
+            self.custom_data = base64.b64decode(
+                "".join(raw_custom_data.split())
+            )
         self.username = self._parse_property(
             config_set, "UserName", required=False
         )
         self.password = self._parse_property(
             config_set, "UserPassword", required=False
         )
+        if self.password is not None and decryptor is not None:
+            # Secrets provisioning: UserPassword holds an encrypted JWT.
+            self.password = decryptor("adminPassword", self.password)
         self.hostname = self._parse_property(
             config_set, "HostName", required=True
         )

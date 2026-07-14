@@ -4198,6 +4198,68 @@ class TestDetermineSecretsProvisioning:
         )
 
 
+class TestSecretDecryption:
+    def test_get_secret_decryptor_returns_none_when_disabled(self, azure_ds):
+        azure_ds._secrets_provisioning_enabled = False
+
+        assert azure_ds._get_secret_decryptor() is None
+
+    def test_get_secret_decryptor_returns_wrapper_when_enabled(self, azure_ds):
+        azure_ds._secrets_provisioning_enabled = True
+
+        assert azure_ds._get_secret_decryptor() is dsaz.cvm.unprotect_secret
+
+    def test_read_azure_ovf_decrypts_secrets(self):
+        """customData and adminPassword are decrypted before applying."""
+
+        def fake_decrypt(field, token):
+            return {
+                "customData": b64e("plain-userdata"),
+                "adminPassword": "plain-password",
+            }[field]
+
+        decryptor = mock.Mock(side_effect=fake_decrypt)
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        )
+
+        _md, ud, _cfg = dsaz.read_azure_ovf(ovf, decryptor=decryptor)
+
+        assert ud == b"plain-userdata"
+        assert decryptor.call_args_list == [
+            mock.call("customData", b64e("encrypted-cd")),
+            mock.call("adminPassword", "encrypted-pw"),
+        ]
+
+    @pytest.mark.parametrize("failing_field", ["customData", "adminPassword"])
+    def test_read_azure_ovf_decrypt_failure_propagates(self, failing_field):
+        """A decryption failure surfaces as a reportable error (E2/E3)."""
+
+        def fake_decrypt(field, token):
+            if field == failing_field:
+                raise errors.ReportableErrorSecretDecryptionFailure(
+                    field=field,
+                    exception=subp.ProcessExecutionError(
+                        exit_code=1, stderr="nope"
+                    ),
+                )
+            # customData must yield valid base64 so parsing reaches the
+            # adminPassword field.
+            return b64e("ok")
+
+        decryptor = mock.Mock(side_effect=fake_decrypt)
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        )
+
+        with pytest.raises(
+            errors.ReportableErrorSecretDecryptionFailure
+        ) as exc_info:
+            dsaz.read_azure_ovf(ovf, decryptor=decryptor)
+
+        assert exc_info.value.supporting_data["field"] == failing_field
+
+
 class TestProvisioning:
     @pytest.fixture(autouse=True)
     def provisioning_setup(

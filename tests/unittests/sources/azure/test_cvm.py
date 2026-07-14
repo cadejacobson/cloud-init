@@ -255,3 +255,37 @@ class TestIsSecretsProvisioningEnabled:
         assert error.supporting_data["stderr"] == "boom"
         # stdout must never be surfaced (it may be a plaintext secret).
         assert "stdout" not in error.supporting_data
+
+
+class TestUnprotectSecret:
+    def test_success_returns_stdout(self, mock_subp):
+        mock_subp.return_value = subp.SubpResult("plaintext-secret", "")
+
+        assert (
+            cvm.unprotect_secret("customData", "encrypted-token")
+            == "plaintext-secret"
+        )
+        mock_subp.assert_called_once_with(
+            [cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            data="encrypted-token",
+        )
+
+    def test_failure_raises_decryption_error(self, mock_subp):
+        mock_subp.side_effect = subp.ProcessExecutionError(
+            cmd=[cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            exit_code=1,
+            stdout="leaked-secret",
+            stderr="bad token",
+        )
+
+        with pytest.raises(
+            errors.ReportableErrorSecretDecryptionFailure
+        ) as exc_info:
+            cvm.unprotect_secret("adminPassword", "encrypted-token")
+
+        error = exc_info.value
+        assert error.supporting_data["field"] == "adminPassword"
+        assert error.supporting_data["exit_code"] == 1
+        assert error.supporting_data["stderr"] == "bad token"
+        # stdout must never be surfaced (it may be the plaintext secret).
+        assert "stdout" not in error.supporting_data
