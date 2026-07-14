@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 
 from cloudinit import subp
-from cloudinit.sources.azure import cvm
+from cloudinit.sources.azure import cvm, errors
 
 # CPUID register tuples (eax, ebx, ecx, edx) keyed by leaf, used to drive
 # the mocked _cpuid() in the native-detection tests.
@@ -204,3 +204,54 @@ class TestIsCvm:
 
         with pytest.raises(cvm.CvmDetectionError):
             cvm.is_cvm()
+
+
+class TestIsToolPresent:
+    def test_present(self):
+        with mock.patch.object(
+            cvm.subp, "which", return_value="/usr/bin/" + cvm.SECRETS_TOOL
+        ) as m_which:
+            assert cvm.is_tool_present() is True
+
+        m_which.assert_called_once_with(cvm.SECRETS_TOOL)
+
+    def test_absent(self):
+        with mock.patch.object(cvm.subp, "which", return_value=None):
+            assert cvm.is_tool_present() is False
+
+
+class TestIsSecretsProvisioningEnabled:
+    def test_exit_zero_is_enabled(self, mock_subp):
+        mock_subp.return_value = subp.SubpResult("", "")
+
+        assert cvm.is_secrets_provisioning_enabled() is True
+        mock_subp.assert_called_once_with(
+            [cvm.SECRETS_TOOL, "is-secrets-provisioning-enabled"]
+        )
+
+    def test_exit_one_is_disabled(self, mock_subp):
+        mock_subp.side_effect = subp.ProcessExecutionError(
+            cmd=[cvm.SECRETS_TOOL, "is-secrets-provisioning-enabled"],
+            exit_code=1,
+        )
+
+        assert cvm.is_secrets_provisioning_enabled() is False
+
+    def test_unexpected_exit_raises(self, mock_subp):
+        mock_subp.side_effect = subp.ProcessExecutionError(
+            cmd=[cvm.SECRETS_TOOL, "is-secrets-provisioning-enabled"],
+            exit_code=2,
+            stderr="boom",
+        )
+
+        with pytest.raises(errors.ReportableErrorSecretsTool) as exc_info:
+            cvm.is_secrets_provisioning_enabled()
+
+        error = exc_info.value
+        assert error.supporting_data["command"] == (
+            "is-secrets-provisioning-enabled"
+        )
+        assert error.supporting_data["exit_code"] == 2
+        assert error.supporting_data["stderr"] == "boom"
+        # stdout must never be surfaced (it may be a plaintext secret).
+        assert "stdout" not in error.supporting_data

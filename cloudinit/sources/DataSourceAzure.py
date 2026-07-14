@@ -29,7 +29,7 @@ from cloudinit.net.dhcp import (
 )
 from cloudinit.net.ephemeral import EphemeralDHCPv4, EphemeralIPv4Network
 from cloudinit.reporting import events
-from cloudinit.sources.azure import errors, identity, imds, kvp
+from cloudinit.sources.azure import cvm, errors, identity, imds, kvp
 from cloudinit.sources.helpers import netlink
 from cloudinit.sources.helpers.azure import (
     DEFAULT_WIRESERVER_ENDPOINT,
@@ -288,6 +288,9 @@ BUILTIN_DS_CONFIG = {
     "disk_aliases": {"ephemeral0": RESOURCE_DISK_PATH},
     "apply_network_config": True,  # Use IMDS published network configuration
     "apply_network_config_for_secondary_ips": True,  # Configure secondary ips
+    # Require azure-protected-secrets-tool when a CVM needs it but it cannot
+    # be used. Best effort (provision normally) when False.
+    "require_azure_protected_secrets_tool": False,
 }
 
 BUILTIN_CLOUD_EPHEMERAL_DISK_CONFIG = {
@@ -334,6 +337,7 @@ class DataSourceAzure(sources.DataSource):
         self._ephemeral_dhcp_ctx: Optional[EphemeralDHCPv4] = None
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._secrets_provisioning_enabled = False
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
         self._reported_ready_marker_file = os.path.join(
             paths.cloud_dir, "data", "reported_ready"
@@ -346,6 +350,7 @@ class DataSourceAzure(sources.DataSource):
         self._iso_dev = None
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._secrets_provisioning_enabled = False
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
         self._reported_ready_marker_file = os.path.join(
             self.paths.cloud_dir, "data", "reported_ready"
@@ -608,6 +613,68 @@ class DataSourceAzure(sources.DataSource):
                 self._report_failure(reportable_error)
 
     @azure_ds_telemetry_reporter
+    def _determine_secrets_provisioning(self) -> bool:
+        """Gate the CVM secrets-provisioning path.
+
+        Runs cloud-init's own CVM detection first, then consults
+        azure-protected-secrets-tool. Returns True when secrets provisioning
+        is enabled (the v1 path) and False for normal provisioning.
+
+        ``require_azure_protected_secrets_tool`` only applies when the tool is
+        needed but unusable -- an undetermined ``is_cvm()`` or a confirmed CVM
+        with the tool absent: True fails (E1), False provisions normally.
+
+        :raises errors.ReportableErrorRequiredSecretsToolNotFound: when the
+            tool is required but cannot be used.
+        """
+        require_tool = self.ds_cfg.get(
+            "require_azure_protected_secrets_tool", False
+        )
+
+        try:
+            detected_cvm = cvm.is_cvm()
+        except cvm.CvmDetectionError as error:
+            # Native detection failed and the tool could not decide either.
+            report_diagnostic_event(
+                "Unable to determine CVM isolation: %s" % error,
+                logger_func=LOG.warning,
+            )
+            if require_tool:
+                raise errors.ReportableErrorRequiredSecretsToolNotFound()
+            return False
+
+        if not detected_cvm:
+            report_diagnostic_event(
+                "Not a CVM, skipping secrets provisioning.",
+                logger_func=LOG.debug,
+            )
+            return False
+
+        if not cvm.is_tool_present():
+            # Confirmed CVM but the tool is unavailable.
+            if require_tool:
+                raise errors.ReportableErrorRequiredSecretsToolNotFound()
+            report_diagnostic_event(
+                "CVM detected but azure-protected-secrets-tool is absent; "
+                "continuing with best-effort provisioning.",
+                logger_func=LOG.warning,
+            )
+            return False
+
+        if not cvm.is_secrets_provisioning_enabled():
+            report_diagnostic_event(
+                "Secrets provisioning is not enabled.",
+                logger_func=LOG.debug,
+            )
+            return False
+
+        report_diagnostic_event(
+            "Secrets provisioning enabled (v1).",
+            logger_func=LOG.info,
+        )
+        return True
+
+    @azure_ds_telemetry_reporter
     def crawl_metadata(self):
         """Walk all instance metadata sources returning a dict on success.
 
@@ -615,6 +682,13 @@ class DataSourceAzure(sources.DataSource):
         @raise: InvalidMetaDataException when the expected metadata service is
             unavailable, broken or disabled.
         """
+        # CVM secrets provisioning gate. Runs first so a definite non-CVM
+        # skips it entirely. Fatal (E1) only when the tool is required but
+        # unusable.
+        self._secrets_provisioning_enabled = (
+            self._determine_secrets_provisioning()
+        )
+
         crawled_data = {}
         # azure removes/ejects the cdrom containing the ovf-env.xml
         # file on reboot.  So, in order to successfully reboot we

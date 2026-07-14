@@ -18,6 +18,7 @@ import os
 import struct
 
 from cloudinit import subp
+from cloudinit.sources.azure import errors
 
 LOG = logging.getLogger(__name__)
 
@@ -104,3 +105,41 @@ def is_cvm() -> bool:
         LOG.debug("Native CVM detection undetermined, trying tool: %s", error)
 
     return _is_cvm_tool()
+
+
+def is_tool_present() -> bool:
+    """True when azure-protected-secrets-tool is available on PATH."""
+    return subp.which(SECRETS_TOOL) is not None
+
+
+def _run_tool(command: str) -> bool:
+    """Run an azure-protected-secrets-tool subcommand with a 0/1 contract.
+
+    :return: True on exit 0, False on exit 1 (the documented "false" result).
+    :raises errors.ReportableErrorSecretsTool: on any other (unexpected) exit
+        code, with the reason taken from stderr. stdout is never surfaced --
+        for some commands (e.g. unprotect-secret) it is the plaintext secret.
+    """
+    try:
+        subp.subp([SECRETS_TOOL, command])
+    except subp.ProcessExecutionError as error:
+        # exit 1 is the documented "false" result, not an error.
+        if error.exit_code == 1:
+            return False
+        raise errors.ReportableErrorSecretsTool(
+            command=command, exception=error
+        ) from error
+    return True
+
+
+def is_secrets_provisioning_enabled() -> bool:
+    """True when secrets provisioning is enabled for this VM (v1).
+
+    Runs ``azure-protected-secrets-tool is-secrets-provisioning-enabled``:
+    exit 0 means enabled, exit 1 means disabled.
+
+    :raises errors.ReportableErrorSecretsTool: on any other (unexpected) exit
+        code, so the caller reports it (reason from stderr) rather than
+        silently continuing.
+    """
+    return _run_tool("is-secrets-provisioning-enabled")

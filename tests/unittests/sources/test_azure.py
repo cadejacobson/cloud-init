@@ -110,6 +110,13 @@ def mock_device_driver():
 
 
 @pytest.fixture(autouse=True)
+def mock_cvm_is_cvm():
+    """Default all tests to a non-CVM so the secrets gate is a no-op."""
+    with mock.patch.object(dsaz.cvm, "is_cvm", return_value=False) as m:
+        yield m
+
+
+@pytest.fixture(autouse=True)
 def mock_netinfo(disable_netdev_info):
     pass
 
@@ -3688,6 +3695,104 @@ class TestInstanceId:
         assert id == "50109936-ef07-47fe-ac82-890c853f60d5"
 
 
+class TestDetermineSecretsProvisioning:
+    @pytest.fixture
+    def mock_is_cvm(self):
+        # No autospec: the autouse ``mock_cvm_is_cvm`` fixture has already
+        # replaced ``is_cvm`` with a mock, and autospec cannot wrap an
+        # attribute that is already mocked out.
+        with mock.patch.object(dsaz.cvm, "is_cvm") as m:
+            yield m
+
+    @pytest.fixture
+    def mock_is_tool_present(self):
+        with mock.patch.object(
+            dsaz.cvm, "is_tool_present", autospec=True
+        ) as m:
+            yield m
+
+    @pytest.fixture
+    def mock_is_secrets_provisioning_enabled(self):
+        with mock.patch.object(
+            dsaz.cvm, "is_secrets_provisioning_enabled", autospec=True
+        ) as m:
+            yield m
+
+    def test_non_cvm_skips_tool(
+        self,
+        azure_ds,
+        mock_is_cvm,
+        mock_is_tool_present,
+        mock_is_secrets_provisioning_enabled,
+    ):
+        mock_is_cvm.return_value = False
+
+        assert azure_ds._determine_secrets_provisioning() is False
+        assert mock_is_tool_present.mock_calls == []
+        assert mock_is_secrets_provisioning_enabled.mock_calls == []
+
+    @pytest.mark.parametrize("require_tool", [True, False])
+    def test_undetermined_cvm(self, azure_ds, mock_is_cvm, require_tool):
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = require_tool
+        mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
+
+        if require_tool:
+            with pytest.raises(
+                errors.ReportableErrorRequiredSecretsToolNotFound
+            ):
+                azure_ds._determine_secrets_provisioning()
+        else:
+            assert azure_ds._determine_secrets_provisioning() is False
+
+    @pytest.mark.parametrize("require_tool", [True, False])
+    def test_cvm_tool_absent(
+        self, azure_ds, mock_is_cvm, mock_is_tool_present, require_tool
+    ):
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = require_tool
+        mock_is_cvm.return_value = True
+        mock_is_tool_present.return_value = False
+
+        if require_tool:
+            with pytest.raises(
+                errors.ReportableErrorRequiredSecretsToolNotFound
+            ):
+                azure_ds._determine_secrets_provisioning()
+        else:
+            assert azure_ds._determine_secrets_provisioning() is False
+
+    def test_cvm_tool_present_not_enabled(
+        self,
+        azure_ds,
+        mock_is_cvm,
+        mock_is_tool_present,
+        mock_is_secrets_provisioning_enabled,
+    ):
+        mock_is_cvm.return_value = True
+        mock_is_tool_present.return_value = True
+        mock_is_secrets_provisioning_enabled.return_value = False
+
+        assert azure_ds._determine_secrets_provisioning() is False
+
+    def test_cvm_tool_present_enabled(
+        self,
+        azure_ds,
+        mock_is_cvm,
+        mock_is_tool_present,
+        mock_is_secrets_provisioning_enabled,
+    ):
+        mock_is_cvm.return_value = True
+        mock_is_tool_present.return_value = True
+        mock_is_secrets_provisioning_enabled.return_value = True
+
+        assert azure_ds._determine_secrets_provisioning() is True
+
+    def test_default_require_flag_is_false(self, azure_ds):
+        assert (
+            azure_ds.ds_cfg.get("require_azure_protected_secrets_tool")
+            is False
+        )
+
+
 class TestProvisioning:
     @pytest.fixture(autouse=True)
     def provisioning_setup(
@@ -3772,6 +3877,25 @@ class TestProvisioning:
                 ]
             },
         }
+
+    def test_secrets_tool_required_but_undetermined_reports_failure(self):
+        """A required-but-unusable secrets tool fails provisioning (E1)."""
+        self.azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
+        with mock.patch.object(
+            dsaz.cvm,
+            "is_cvm",
+            side_effect=dsaz.cvm.CvmDetectionError("undetermined"),
+        ):
+            assert self.azure_ds._check_and_get_data() is False
+
+        # E1 was reported to the host via KVP.
+        assert self.mock_kvp_report_failure_to_host.mock_calls == [
+            mock.call(errors.ReportableErrorRequiredSecretsToolNotFound()),
+        ]
+
+        # The VM was left unconfigured: OVF media was never read.
+        assert self.mock_util_mount_cb.mock_calls == []
+        assert self.azure_ds._secrets_provisioning_enabled is False
 
     def test_no_pps(self):
         ovf = construct_ovf_env(provision_guest_proxy_agent=False)
