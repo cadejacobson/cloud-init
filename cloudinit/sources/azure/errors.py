@@ -238,6 +238,25 @@ class ReportableErrorProxyAgentStatusFailure(ReportableError):
         self.supporting_data["stderr"] = exception.stderr
 
 
+class ReportableErrorRequiredSecretsToolNotFound(ReportableError):
+    def __init__(self) -> None:
+        super().__init__("required azure-protected-secrets-tool not found")
+
+
+class ReportableErrorSecretsTool(ReportableError):
+    def __init__(
+        self, *, command: str, exception: subp.ProcessExecutionError
+    ) -> None:
+        super().__init__("azure-protected-secrets-tool %s failed" % command)
+
+        # stdout is intentionally omitted: for commands such as
+        # unprotect-secret it is the plaintext secret and must never be
+        # surfaced in a report or log.
+        self.supporting_data["command"] = command
+        self.supporting_data["exit_code"] = exception.exit_code
+        self.supporting_data["stderr"] = exception.stderr
+
+
 class ReportableErrorVmIdentification(ReportableError):
     def __init__(
         self, *, exception: Exception, system_uuid: Optional[str] = None

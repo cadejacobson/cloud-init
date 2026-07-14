@@ -8,7 +8,7 @@ from xml.etree import ElementTree as ET
 import pytest
 import requests
 
-from cloudinit import version
+from cloudinit import subp, version
 from cloudinit.sources.azure import errors
 from cloudinit.url_helper import UrlError
 
@@ -289,3 +289,36 @@ def test_vm_identification_exception():
     assert error.reason == "failure to identify Azure VM ID"
     assert error.supporting_data["exception"] == repr(exception)
     assert error.supporting_data["system_uuid"] == system_uuid
+
+
+def test_required_secrets_tool_not_found():
+    error = errors.ReportableErrorRequiredSecretsToolNotFound()
+
+    assert error.reason == "required azure-protected-secrets-tool not found"
+
+
+def test_secrets_tool_failure():
+    exception = subp.ProcessExecutionError(
+        cmd=[
+            "azure-protected-secrets-tool",
+            "is-secrets-provisioning-enabled",
+        ],
+        exit_code=2,
+        stdout="super-secret-plaintext",
+        stderr="boom",
+    )
+
+    error = errors.ReportableErrorSecretsTool(
+        command="is-secrets-provisioning-enabled", exception=exception
+    )
+
+    assert error.reason == (
+        "azure-protected-secrets-tool is-secrets-provisioning-enabled failed"
+    )
+    assert (
+        error.supporting_data["command"] == "is-secrets-provisioning-enabled"
+    )
+    assert error.supporting_data["exit_code"] == 2
+    assert error.supporting_data["stderr"] == "boom"
+    # stdout must never be surfaced (it may be a plaintext secret).
+    assert "stdout" not in error.supporting_data
