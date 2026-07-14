@@ -143,3 +143,31 @@ def is_secrets_provisioning_enabled() -> bool:
         silently continuing.
     """
     return _run_tool("is-secrets-provisioning-enabled")
+
+
+def unprotect_secret(field: str, token: str) -> str:
+    """Decrypt a single ovf-env.xml secret via azure-protected-secrets-tool.
+
+    Runs ``unprotect-secret --policy 3`` (require both signature and
+    encryption) with the encrypted ``token`` piped on stdin and returns the
+    decrypted plaintext, which the tool writes to stdout.
+
+    The return value -- and the subprocess output -- is the plaintext secret
+    and must never be logged.
+
+    :param field: the ovf-env.xml field name, used only for error reporting.
+    :param token: the encrypted JWT read from ovf-env.xml.
+    :raises errors.ReportableErrorSecretDecryptionFailure: if decryption
+        fails. The reason is taken from stderr; stdout is never surfaced,
+        since it is the plaintext secret.
+    """
+    try:
+        result = subp.subp(
+            [SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            data=token,
+        )
+    except subp.ProcessExecutionError as error:
+        raise errors.ReportableErrorSecretDecryptionFailure(
+            field=field, exception=error
+        ) from error
+    return result.stdout
