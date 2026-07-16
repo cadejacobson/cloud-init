@@ -950,7 +950,7 @@ class DataSourceAzure(sources.DataSource):
             Path("/run/cloud-init/imds.json").write_text(
                 json.dumps(md, indent=2)
             )
-            LOG.info("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
+            LOG.warning("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
             return md
         except UrlError as error:
             error_string = str(error)
@@ -2016,7 +2016,7 @@ def read_azure_ovf(contents, decryptor=None):
     # reveals whether adminPassword arrived encrypted) to diagnose
     # provisioning. Logged before parse so it survives a parse/decrypt
     # failure. Remove before production.
-    LOG.info(
+    LOG.warning(
         "Reading ovf-env.xml: %s",
         contents.decode("utf-8", "ignore")
         if isinstance(contents, bytes)
@@ -2152,7 +2152,7 @@ def load_azure_ds_dir(source_dir, decryptor=None):
                     arcname = os.path.relpath(fpath, source_dir)
                     zf.write(fpath, arcname)
         shutil.copy2(str(zip_path), str(persist_dir / "ovf-media.zip"))
-        LOG.info(
+        LOG.warning(
             "Captured provisioning media to %s (%d bytes)",
             zip_path,
             zip_path.stat().st_size,
