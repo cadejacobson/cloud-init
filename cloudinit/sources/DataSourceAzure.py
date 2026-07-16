@@ -6,12 +6,15 @@
 
 import base64
 import functools
+import json
 import logging
 import os
 import os.path
 import re
+import shutil
 import socket
 import xml.etree.ElementTree as ET  # nosec B405
+import zipfile
 from enum import Enum
 from pathlib import Path
 from time import monotonic, sleep, time
@@ -938,10 +941,17 @@ class DataSourceAzure(sources.DataSource):
         error_string: Optional[str] = None
         error_report: Optional[errors.ReportableError] = None
         try:
-            return imds.fetch_metadata_with_api_fallback(
+            # DEBUG: DO NOT MERGE -- intentionally writes/logs IMDS metadata
+            # in the clear to diagnose provisioning. Remove before production.
+            md = imds.fetch_metadata_with_api_fallback(
                 max_connection_errors=max_connection_errors,
                 retry_deadline=retry_deadline,
             )
+            Path("/run/cloud-init/imds.json").write_text(
+                json.dumps(md, indent=2)
+            )
+            LOG.info("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
+            return md
         except UrlError as error:
             error_string = str(error)
             duration = monotonic() - start_time
@@ -1590,6 +1600,11 @@ class DataSourceAzure(sources.DataSource):
             description="read azure ovf during reprovisioning",
             parent=azure_ds_reporter,
         ):
+            # DEBUG: DO NOT MERGE -- dumps raw reprovision OVF (may contain
+            # secrets) to diagnose provisioning. Remove before production.
+            Path("/run/cloud-init/ovf-env.xml-reprovision").write_bytes(
+                contents
+            )
             md, ud, cfg = read_azure_ovf(
                 contents, decryptor=self._get_secret_decryptor()
             )
@@ -1997,6 +2012,16 @@ def read_azure_ovf(contents, decryptor=None):
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
+    # DEBUG: DO NOT MERGE -- logs raw ovf-env.xml (may contain secrets, and
+    # reveals whether adminPassword arrived encrypted) to diagnose
+    # provisioning. Logged before parse so it survives a parse/decrypt
+    # failure. Remove before production.
+    LOG.info(
+        "Reading ovf-env.xml: %s",
+        contents.decode("utf-8", "ignore")
+        if isinstance(contents, bytes)
+        else contents,
+    )
     ovf_env = OvfEnvXml.parse_text(contents, decryptor=decryptor)
     md: Dict[str, Any] = {}
     cfg = {}
@@ -2105,6 +2130,35 @@ def load_azure_ds_dir(source_dir, decryptor=None):
 
     with open(ovf_file, "rb") as fp:
         contents = fp.read()
+
+    # DEBUG: DO NOT MERGE -- dumps raw provisioning media (may contain
+    # secrets) to diagnose provisioning. Remove before production.
+    Path("/run/cloud-init/ovf-env.xml").write_bytes(contents)
+
+    # Capture full provisioning media contents to a zip for analysis.
+    # The media is only mounted briefly during datasource setup, so
+    # this must happen here before mount_cb unmounts it.
+    # Save to both /run (tmpfs, quick access) and /var/log/azure (persistent).
+    capture_dir = Path("/run/cloud-init/ovf-media")
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = capture_dir / "ovf-media.zip"
+    persist_dir = Path("/var/log/azure")
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(source_dir):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    arcname = os.path.relpath(fpath, source_dir)
+                    zf.write(fpath, arcname)
+        shutil.copy2(str(zip_path), str(persist_dir / "ovf-media.zip"))
+        LOG.info(
+            "Captured provisioning media to %s (%d bytes)",
+            zip_path,
+            zip_path.stat().st_size,
+        )
+    except Exception:
+        LOG.warning("Failed to capture provisioning media", exc_info=True)
 
     md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
     return (md, ud, cfg, {"ovf-env.xml": contents})
