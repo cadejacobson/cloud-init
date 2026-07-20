@@ -195,7 +195,7 @@ def fetch_metadata_with_api_fallback(
         retry_deadline=retry_deadline,
     )
     try:
-        url = IMDS_URL + "/instance?api-version=2021-08-01&extended=true"
+        url = IMDS_URL + "/instance?api-version=2026-06-23&extended=true"
         return _fetch_metadata(url, retry_handler=retry_handler)
     except UrlError as error:
         if error.code == 400:
