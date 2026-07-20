@@ -164,7 +164,7 @@ def unprotect_secret(field: str, token: str) -> str:
     # DEBUG: DO NOT MERGE -- logs the incoming token (to confirm the field
     # arrived encrypted) and the decrypted plaintext (to confirm the tool
     # ran). This intentionally leaks the secret. Remove before production.
-    LOG.info("unprotect-secret: field=%s incoming token=%r", field, token)
+    LOG.warning("unprotect-secret: field=%s incoming token=%r", field, token)
     try:
         result = subp.subp(
             [SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
@@ -175,7 +175,7 @@ def unprotect_secret(field: str, token: str) -> str:
             field=field, exception=error
         ) from error
     # DEBUG: DO NOT MERGE -- see note above. Leaks decrypted plaintext.
-    LOG.info(
+    LOG.warning(
         "unprotect-secret: field=%s decrypted plaintext=%r",
         field,
         result.stdout,
