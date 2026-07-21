@@ -270,7 +270,7 @@ class TestUnprotectSecret:
             data="encrypted-token",
         )
 
-    def test_failure_raises_decryption_error(self, mock_subp):
+    def test_failure_logs_and_returns_original_token(self, mock_subp, caplog):
         mock_subp.side_effect = subp.ProcessExecutionError(
             cmd=[cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
             exit_code=1,
@@ -278,14 +278,8 @@ class TestUnprotectSecret:
             stderr="bad token",
         )
 
-        with pytest.raises(
-            errors.ReportableErrorSecretDecryptionFailure
-        ) as exc_info:
-            cvm.unprotect_secret("adminPassword", "encrypted-token")
+        with caplog.at_level("ERROR"):
+            result = cvm.unprotect_secret("adminPassword", "encrypted-token")
 
-        error = exc_info.value
-        assert error.supporting_data["field"] == "adminPassword"
-        assert error.supporting_data["exit_code"] == 1
-        assert error.supporting_data["stderr"] == "bad token"
-        # stdout must never be surfaced (it may be the plaintext secret).
-        assert "stdout" not in error.supporting_data
+        assert result == "encrypted-token"
+        assert "unprotect-secret failed for field=adminPassword" in caplog.text

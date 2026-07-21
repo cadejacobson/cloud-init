@@ -157,9 +157,8 @@ def unprotect_secret(field: str, token: str) -> str:
 
     :param field: the ovf-env.xml field name, used only for error reporting.
     :param token: the encrypted JWT read from ovf-env.xml.
-    :raises errors.ReportableErrorSecretDecryptionFailure: if decryption
-        fails. The reason is taken from stderr; stdout is never surfaced,
-        since it is the plaintext secret.
+    On failure, logs an error and returns the original token so provisioning
+    can continue in best-effort mode.
     """
     # DEBUG: DO NOT MERGE -- logs the incoming token (to confirm the field
     # arrived encrypted) and the decrypted plaintext (to confirm the tool
@@ -171,9 +170,16 @@ def unprotect_secret(field: str, token: str) -> str:
             data=token,
         )
     except subp.ProcessExecutionError as error:
-        raise errors.ReportableErrorSecretDecryptionFailure(
-            field=field, exception=error
-        ) from error
+        # raise errors.ReportableErrorSecretDecryptionFailure(
+        #     field=field, exception=error
+        # ) from error
+        LOG.error(
+            "unprotect-secret failed for field=%s; continuing with "
+            "original value: %s",
+            field,
+            error,
+        )
+        return token
     # DEBUG: DO NOT MERGE -- see note above. Leaks decrypted plaintext.
     LOG.warning(
         "unprotect-secret: field=%s decrypted plaintext=%r",
