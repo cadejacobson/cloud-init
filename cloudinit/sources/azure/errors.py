@@ -21,7 +21,7 @@ LOG = logging.getLogger(__name__)
 
 # Maximum supported password length for the Azure OSProfile on Linux.
 # https://learn.microsoft.com/en-us/javascript/api/%40azure/arm-compute/osprofile?view=azure-node-latest#@azure-arm-compute-osprofile-adminpassword
-MAX_PASSWORD_LENGTH = 72
+MAX_PASSWORD_LENGTH = 7
 
 
 def encode_report(
