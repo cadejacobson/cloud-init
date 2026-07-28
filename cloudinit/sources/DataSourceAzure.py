@@ -728,24 +728,29 @@ class DataSourceAzure(sources.DataSource):
         secret_decryptor = self._get_secret_decryptor()
 
         for src in list_possible_azure_ds(self.seed_dir, ddir):
+            # Only decrypt secrets when reading live provisioning media. The
+            # cached OVF in ddir is written after provisioning (with the
+            # password redacted and customData left encrypted), so re-running
+            # the decryptor on reboot would fail. Read the cached copy as-is.
+            source_decryptor = None if src == ddir else secret_decryptor
             try:
                 if src.startswith("/dev/"):
                     if util.is_FreeBSD():
                         md, userdata_raw, cfg, files = util.mount_cb(
                             src,
                             load_azure_ds_dir,
-                            data=secret_decryptor,
+                            data=source_decryptor,
                             mtype="udf",
                         )
                     else:
                         md, userdata_raw, cfg, files = util.mount_cb(
-                            src, load_azure_ds_dir, data=secret_decryptor
+                            src, load_azure_ds_dir, data=source_decryptor
                         )
                     # save the device for ejection later
                     self._iso_dev = src
                 else:
                     md, userdata_raw, cfg, files = load_azure_ds_dir(
-                        src, secret_decryptor
+                        src, source_decryptor
                     )
 
                 ovf_source = src
@@ -1605,9 +1610,13 @@ class DataSourceAzure(sources.DataSource):
             Path("/run/cloud-init/ovf-env.xml-reprovision").write_bytes(
                 contents
             )
-            md, ud, cfg = read_azure_ovf(
-                contents, decryptor=self._get_secret_decryptor()
-            )
+            decryptor = self._get_secret_decryptor()
+            md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
+            if decryptor is not None:
+                # Persist decrypted CustomData as plaintext so a later reboot
+                # (which reads the cache without a decryptor) does not fail on
+                # the encrypted token.
+                contents = _persist_decrypted_custom_data(contents, ud)
             return (md, ud, cfg, {"ovf-env.xml": contents})
 
     @azure_ds_telemetry_reporter
@@ -2069,6 +2078,41 @@ def read_azure_ovf(contents, decryptor=None):
     return (md, ud, cfg)
 
 
+def _persist_decrypted_custom_data(contents: bytes, userdata) -> bytes:
+    """Return ovf-env.xml with CustomData rewritten as plaintext user-data.
+
+    On the CVM secrets-provisioning path the CustomData element holds an
+    encrypted token. Once decrypted, persist the plaintext (base64-encoded
+    user-data) into the cached ovf-env.xml so that a reboot -- which reads the
+    cache without a decryptor -- can base64-decode it directly instead of
+    failing on the stale encrypted token.
+
+    :param contents: Raw ovf-env.xml bytes as read from provisioning media.
+    :param userdata: Decrypted user-data bytes (``ovf_env.custom_data``).
+    :return: ovf-env.xml bytes with plaintext CustomData, or ``contents``
+        unchanged when there is nothing to persist.
+    """
+    if not isinstance(userdata, (bytes, bytearray)) or not userdata:
+        # No decrypted user-data to persist (e.g. no CustomData element).
+        return contents
+
+    plaintext_b64 = base64.b64encode(userdata).decode("ascii")
+    try:
+        root = ET.fromstring(contents)  # nosec B314
+    except ET.ParseError:
+        LOG.warning("Failed to rewrite CustomData in cached ovf-env.xml")
+        return contents
+
+    replaced = False
+    for elem in root.iter():
+        if elem.tag.endswith("CustomData"):
+            elem.text = plaintext_b64
+            replaced = True
+    if not replaced:
+        return contents
+    return ET.tostring(root)
+
+
 def encrypt_pass(password):
     return blowfish_hash(password)
 
@@ -2161,6 +2205,10 @@ def load_azure_ds_dir(source_dir, decryptor=None):
         LOG.warning("Failed to capture provisioning media", exc_info=True)
 
     md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
+    if decryptor is not None:
+        # Persist decrypted CustomData as plaintext so reboots (which read
+        # this cache without a decryptor) do not fail on the encrypted token.
+        contents = _persist_decrypted_custom_data(contents, ud)
     return (md, ud, cfg, {"ovf-env.xml": contents})
 
 

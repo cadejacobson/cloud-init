@@ -3854,6 +3854,92 @@ class TestSecretDecryption:
 
         assert exc_info.value.supporting_data["field"] == failing_field
 
+    def _capture_crawl_decryptor(self, azure_ds, sources):
+        """Run crawl_metadata over ``sources`` and capture decryptor args.
+
+        Secrets provisioning is forced on, and ``load_azure_ds_dir`` is
+        stubbed to record the decryptor passed for each source before
+        aborting the crawl so no networking is attempted.
+        """
+
+        class _StopCrawl(Exception):
+            pass
+
+        captured = []
+
+        def fake_load(src, decryptor=None):
+            captured.append((src, decryptor))
+            raise _StopCrawl
+
+        with mock.patch.object(
+            azure_ds, "_determine_secrets_provisioning", return_value=True
+        ), mock.patch.object(
+            dsaz, "list_possible_azure_ds", return_value=iter(sources)
+        ), mock.patch.object(
+            dsaz, "load_azure_ds_dir", side_effect=fake_load
+        ):
+            with pytest.raises(_StopCrawl):
+                azure_ds.crawl_metadata()
+
+        return captured
+
+    def test_crawl_cache_dir_source_skips_decryption(self, azure_ds):
+        """Reboot reads the cached OVF in data_dir without a decryptor."""
+        ddir = azure_ds.ds_cfg["data_dir"]
+
+        captured = self._capture_crawl_decryptor(azure_ds, [ddir])
+
+        assert captured == [(ddir, None)]
+
+    def test_crawl_live_media_source_uses_decryptor(self, azure_ds):
+        """Provisioning media is decrypted with the secrets decryptor."""
+        ddir = azure_ds.ds_cfg["data_dir"]
+        media = os.path.join(os.path.dirname(ddir), "live-provisioning-seed")
+
+        captured = self._capture_crawl_decryptor(azure_ds, [media, ddir])
+
+        assert captured == [(media, dsaz.cvm.unprotect_secret)]
+
+    def test_persist_decrypted_custom_data_rewrites_plaintext(self):
+        """CustomData is rewritten to base64 plaintext of the user-data."""
+        ovf = construct_ovf_env(custom_data="encrypted-cd").encode("utf-8")
+
+        result = dsaz._persist_decrypted_custom_data(ovf, b"plain-userdata")
+
+        # The cached OVF now decodes to plaintext without a decryptor.
+        _md, ud, _cfg = dsaz.read_azure_ovf(result, decryptor=None)
+        assert ud == b"plain-userdata"
+
+    def test_persist_decrypted_custom_data_noop_without_userdata(self):
+        """Nothing to persist leaves the OVF bytes untouched."""
+        ovf = construct_ovf_env(custom_data="encrypted-cd").encode("utf-8")
+
+        assert dsaz._persist_decrypted_custom_data(ovf, "") is ovf
+        assert dsaz._persist_decrypted_custom_data(ovf, None) is ovf
+        assert dsaz._persist_decrypted_custom_data(ovf, b"") is ovf
+
+    def test_decrypted_custom_data_survives_reboot_read(self):
+        """Cached plaintext CustomData decodes on reboot without a decryptor."""
+
+        def fake_decrypt(field, token):
+            return {
+                "customData": b64e("plain-userdata"),
+                "adminPassword": "plain-password",
+            }[field]
+
+        decryptor = mock.Mock(side_effect=fake_decrypt)
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        ).encode("utf-8")
+
+        # Provisioning: decrypt and persist plaintext CustomData to cache.
+        _md, ud, _cfg = dsaz.read_azure_ovf(ovf, decryptor=decryptor)
+        cached = dsaz._persist_decrypted_custom_data(ovf, ud)
+
+        # Reboot: the cache dir is read without a decryptor.
+        _md2, ud2, _cfg2 = dsaz.read_azure_ovf(cached, decryptor=None)
+        assert ud2 == b"plain-userdata"
+
 
 class TestProvisioning:
     @pytest.fixture(autouse=True)
