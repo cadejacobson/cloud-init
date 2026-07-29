@@ -1084,6 +1084,11 @@ class OvfEnvXml:
             value = default
 
         if decode_base64 and value is not None:
+            # TEMPORARY (validation only): intentionally corrupt CustomData with
+            # a non-base64 string to exercise ReportableErrorOvfInvalidBase64.
+            # Revert before merging.
+            if name == "CustomData":
+                value = "not_base64"
             value = base64.b64decode("".join(value.split()))
 
         if parse_bool:
