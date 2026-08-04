@@ -1089,7 +1089,15 @@ class OvfEnvXml:
             # Revert before merging.
             if name == "CustomData":
                 value = "not_base64"
-            value = base64.b64decode("".join(value.split()))
+            stripped_value = "".join(value.split())
+            try:
+                value = base64.b64decode(stripped_value)
+            except binascii.Error as error:
+                raise errors.ReportableErrorOvfInvalidBase64(
+                    field=name,
+                    error=error,
+                    length=len(stripped_value),
+                ) from error
 
         if parse_bool:
             value = util.translate_bool(value)
