@@ -211,7 +211,7 @@ class ReportableErrorOvfInvalidBase64(ReportableError):
 
         # binascii.Error messages describe the failure without echoing data.
         self.supporting_data["field"] = field
-        self.supporting_data["exception"] = repr(error)
+        self.supporting_data["exception"] = str(error)
         self.supporting_data["length"] = length
 
 
