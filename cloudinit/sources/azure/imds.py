@@ -5,7 +5,7 @@
 import logging
 import uuid
 from time import monotonic
-from typing import Dict, Optional, Type, Union
+from typing import Dict, Optional, Tuple, Type, Union
 
 import requests
 
@@ -159,7 +159,7 @@ def _fetch_metadata(
     url: str,
     *,
     retry_handler: ReadUrlRetryHandler,
-) -> Dict:
+) -> Tuple[bytes, Dict]:
     """Fetch IMDS metadata.
 
     :param url: url to fetch.
@@ -167,11 +167,13 @@ def _fetch_metadata(
 
     :raises UrlError: on error fetching metadata.
     :raises ValueError: on error parsing metadata.
+
+    :return: the raw response bytes and the parsed metadata.
     """
     metadata = _fetch_url(url, retry_handler=retry_handler)
 
     try:
-        return util.load_json(metadata.decode("utf-8"))
+        return metadata, util.load_json(metadata.decode("utf-8"))
     except ValueError as error:
         report_diagnostic_event(
             "Failed to parse metadata from IMDS: %s" % error,
@@ -180,10 +182,14 @@ def _fetch_metadata(
         raise
 
 
-def fetch_metadata_with_api_fallback(
+def fetch_metadata_and_raw_with_api_fallback(
     retry_deadline: float, max_connection_errors: Optional[int] = None
-) -> Dict:
-    """Fetch extended metadata, falling back to non-extended as required.
+) -> Tuple[bytes, Dict]:
+    """Fetch extended metadata, returning the raw response and parsed dict.
+
+    The raw bytes are needed on the CVM secrets path to pipe the signed
+    SignatureInfo block to azure-protected-secrets-tool for validation,
+    without re-serializing (which could drift from the signed bytes).
 
     :param retry_deadline: time()-based deadline to retry until.
 
@@ -200,16 +206,33 @@ def fetch_metadata_with_api_fallback(
     except UrlError as error:
         if error.code == 400:
             report_diagnostic_event(
-                "Falling back to IMDS api-version: 2019-06-01",
+                "Falling back to IMDS api-version: 2021-08-01",
                 logger_func=LOG.warning,
             )
             retry_handler = ReadUrlRetryHandler(
                 max_connection_errors=max_connection_errors,
                 retry_deadline=retry_deadline,
             )
-            url = IMDS_URL + "/instance?api-version=2019-06-01"
+            url = IMDS_URL + "/instance?api-version=2021-08-01"
             return _fetch_metadata(url, retry_handler=retry_handler)
         raise
+
+
+def fetch_metadata_with_api_fallback(
+    retry_deadline: float, max_connection_errors: Optional[int] = None
+) -> Dict:
+    """Fetch extended metadata, falling back to non-extended as required.
+
+    :param retry_deadline: time()-based deadline to retry until.
+
+    :raises UrlError: on error fetching metadata.
+    :raises ValueError: on error parsing metadata.
+    """
+    _raw, metadata = fetch_metadata_and_raw_with_api_fallback(
+        retry_deadline=retry_deadline,
+        max_connection_errors=max_connection_errors,
+    )
+    return metadata
 
 
 def fetch_reprovision_data() -> bytes:

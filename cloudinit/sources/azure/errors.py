@@ -264,3 +264,13 @@ class ReportableErrorSecretDecryptionFailure(ReportableError):
         self.supporting_data["field"] = field
         self.supporting_data["exit_code"] = exception.exit_code
         self.supporting_data["stderr"] = exception.stderr
+
+
+class ReportableErrorImdsMetadataValidationFailure(ReportableError):
+    def __init__(self, *, exception: subp.ProcessExecutionError) -> None:
+        super().__init__("failure to validate IMDS metadata")
+
+        # stderr carries the field that failed validation. stdout holds the
+        # validated fields, which we do not need, so it is omitted.
+        self.supporting_data["exit_code"] = exception.exit_code
+        self.supporting_data["stderr"] = exception.stderr

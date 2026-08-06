@@ -187,3 +187,26 @@ def unprotect_secret(field: str, token: str) -> str:
         result.stdout,
     )
     return result.stdout
+
+
+def validate_imds_metadata(metadata: bytes) -> None:
+    """Validate signed IMDS metadata via azure-protected-secrets-tool.
+
+    Pipes the raw extended IMDS response -- which carries the SignatureInfo
+    block (cert chain, signature, and per-field digests) -- to
+    ``validate-imds-metadata`` on stdin, the Python equivalent of::
+
+        cat imds.json | azure-protected-secrets-tool validate-imds-metadata
+
+    Exit 0 means the metadata is validated. Any non-zero exit is a validation
+    failure; the reason (the failed field) is read from stderr.
+
+    :param metadata: the raw IMDS response bytes to validate.
+    :raises errors.ReportableErrorImdsMetadataValidationFailure: on failure.
+    """
+    try:
+        subp.subp([SECRETS_TOOL, "validate-imds-metadata"], data=metadata)
+    except subp.ProcessExecutionError as error:
+        raise errors.ReportableErrorImdsMetadataValidationFailure(
+            exception=error
+        ) from error

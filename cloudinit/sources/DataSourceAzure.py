@@ -948,14 +948,27 @@ class DataSourceAzure(sources.DataSource):
         try:
             # DEBUG: DO NOT MERGE -- intentionally writes/logs IMDS metadata
             # in the clear to diagnose provisioning. Remove before production.
-            md = imds.fetch_metadata_with_api_fallback(
-                max_connection_errors=max_connection_errors,
-                retry_deadline=retry_deadline,
-            )
+            if self._secrets_provisioning_enabled:
+                md_raw, md = imds.fetch_metadata_and_raw_with_api_fallback(
+                    max_connection_errors=max_connection_errors,
+                    retry_deadline=retry_deadline,
+                )
+            else:
+                md_raw = None
+                md = imds.fetch_metadata_with_api_fallback(
+                    max_connection_errors=max_connection_errors,
+                    retry_deadline=retry_deadline,
+                )
             Path("/run/cloud-init/imds.json").write_text(
                 json.dumps(md, indent=2)
             )
             LOG.warning("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
+            # On the CVM secrets path, validate the signed IMDS metadata
+            # (SignatureInfo) against the raw bytes before applying it. A
+            # failure raises E5, which propagates to _get_data as a fatal
+            # ReportableError.
+            if md_raw is not None:
+                cvm.validate_imds_metadata(md_raw)
             return md
         except UrlError as error:
             error_string = str(error)
