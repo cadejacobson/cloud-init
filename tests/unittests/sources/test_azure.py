@@ -101,7 +101,7 @@ def mock_chassis_asset_tag():
     with mock.patch.object(
         identity.ChassisAssetTag,
         "query_system",
-        return_value=identity.ChassisAssetTag.AZURE_CLOUD.value,
+        return_value=identity.ChassisAssetTag.AZURE_CLOUD,
     ) as m:
         yield m
 
@@ -3503,28 +3503,31 @@ class TestRemoveUbuntuNetworkConfigScripts:
 
 class TestIsPlatformViable:
     @pytest.mark.parametrize(
-        "tag",
+        "tag,expected_is_azure_stack",
         [
-            identity.ChassisAssetTag.AZURE_CLOUD.value,
+            (identity.ChassisAssetTag.AZURE_CLOUD, False),
+            (identity.ChassisAssetTag.AZURE_STACK, True),
         ],
     )
     def test_true_on_azure_chassis(
-        self, azure_ds, mock_chassis_asset_tag, tag
+        self, azure_ds, mock_chassis_asset_tag, tag, expected_is_azure_stack
     ):
         mock_chassis_asset_tag.return_value = tag
 
-        assert dsaz.DataSourceAzure.ds_detect(None) is True
+        assert azure_ds.ds_detect() is True
+        assert azure_ds._is_azure_stack is expected_is_azure_stack
 
     def test_true_on_azure_ovf_env_in_seed_dir(
-        self, azure_ds, mock_chassis_asset_tag, tmpdir
+        self, azure_ds, mock_chassis_asset_tag
     ):
-        mock_chassis_asset_tag.return_value = "notazure"
+        mock_chassis_asset_tag.return_value = None
 
         seed_path = Path(azure_ds.seed_dir, "ovf-env.xml")
         seed_path.parent.mkdir(exist_ok=True, parents=True)
         seed_path.write_text("")
 
-        assert dsaz.DataSourceAzure.ds_detect(seed_path.parent) is True
+        assert azure_ds.ds_detect() is True
+        assert azure_ds._is_azure_stack is False
 
     def test_false_on_no_matching_azure_criteria(
         self, azure_ds, mock_chassis_asset_tag

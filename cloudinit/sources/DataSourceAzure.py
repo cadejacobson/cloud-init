@@ -347,6 +347,7 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._is_azure_stack = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -361,6 +362,7 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._is_azure_stack = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -958,6 +960,9 @@ class DataSourceAzure(sources.DataSource):
         """
         chassis_tag = identity.ChassisAssetTag.query_system()
         if chassis_tag is not None:
+            self._is_azure_stack = (
+                chassis_tag is identity.ChassisAssetTag.AZURE_STACK
+            )
             return True
 
         # If no valid chassis tag, check for seeded ovf-env.xml.
@@ -2001,6 +2006,15 @@ def read_azure_ovf(contents):
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
+    # DEBUG: DO NOT MERGE -- logs raw ovf-env.xml (may contain secrets) to
+    # diagnose provisioning. Logged before parse so it survives a parse
+    # failure. Remove before production.
+    LOG.warning(
+        "Reading ovf-env.xml: %s",
+        contents.decode("utf-8", "ignore")
+        if isinstance(contents, bytes)
+        else contents,
+    )
     ovf_env = OvfEnvXml.parse_text(contents)
     md: Dict[str, Any] = {}
     cfg = {}
@@ -2113,6 +2127,10 @@ def load_azure_ds_dir(source_dir):
 
     with performance.Timed("Reading ovf-env.xml"), open(ovf_file, "rb") as fp:
         contents = fp.read()
+
+    # DEBUG: DO NOT MERGE -- dumps raw provisioning media (may contain
+    # secrets) to diagnose provisioning. Remove before production.
+    Path("/run/cloud-init/ovf-env.xml").write_bytes(contents)
 
     md, ud, cfg = read_azure_ovf(contents)
     return (md, ud, cfg, {"ovf-env.xml": contents})
