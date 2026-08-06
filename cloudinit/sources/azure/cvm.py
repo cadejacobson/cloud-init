@@ -166,7 +166,7 @@ def unprotect_secret(field: str, token: str) -> str:
     LOG.warning("unprotect-secret: field=%s incoming token=%r", field, token)
     try:
         result = subp.subp(
-            [SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            [SECRETS_TOOL, "unprotect-secret", "--policy", "0"],
             data=token,
         )
     except subp.ProcessExecutionError as error:
