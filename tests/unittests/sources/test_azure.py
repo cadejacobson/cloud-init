@@ -434,6 +434,7 @@ def construct_ovf_env(
     preprovisioned_vm_type=None,
     provision_guest_proxy_agent=None,
     disable_imds=None,
+    disable_wireserver=None,
 ):
     content = [
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -513,13 +514,19 @@ def construct_ovf_env(
         "</ns1:PlatformSettings>",
         "</ns1:PlatformSettingsSection>",
     ]
-    if disable_imds is not None:
-        content += [
-            "<ns1:AzureStackConfigurationSection>",
-            "<ns1:DisableIMDS>%s</ns1:DisableIMDS>"
-            % str(disable_imds).lower(),
-            "</ns1:AzureStackConfigurationSection>",
-        ]
+    if disable_imds is not None or disable_wireserver is not None:
+        content.append("<ns1:AzureStackConfigurationSection>")
+        if disable_imds is not None:
+            content.append(
+                "<ns1:DisableIMDS>%s</ns1:DisableIMDS>"
+                % str(disable_imds).lower()
+            )
+        if disable_wireserver is not None:
+            content.append(
+                "<ns1:DisableWireserver>%s</ns1:DisableWireserver>"
+                % str(disable_wireserver).lower()
+            )
+        content.append("</ns1:AzureStackConfigurationSection>")
     content += [
         "</ns0:Environment>",
     ]
@@ -2989,6 +2996,27 @@ class TestPreprovisioningReadAzureOvfFlag:
         cfg = ret[2]
         assert cfg["DisableIMDS"] is False
 
+    def test_read_azure_ovf_with_disable_wireserver_true(self):
+        """read_azure_ovf sets DisableWireserver cfg flag to True."""
+        content = construct_ovf_env(disable_wireserver=True)
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableWireserver"] is True
+
+    def test_read_azure_ovf_with_disable_wireserver_false(self):
+        """read_azure_ovf sets DisableWireserver cfg flag to False."""
+        content = construct_ovf_env(disable_wireserver=False)
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableWireserver"] is False
+
+    def test_read_azure_ovf_without_disable_wireserver(self):
+        """read_azure_ovf defaults DisableWireserver cfg flag to False."""
+        content = construct_ovf_env()
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableWireserver"] is False
+
 
 @pytest.mark.parametrize(
     "ovf_cfg,imds_md,pps_type",
@@ -4159,6 +4187,34 @@ class TestProvisioning:
 
         # Verify dmesg reported via KVP.
         assert len(self.mock_report_dmesg_to_kvp.mock_calls) == 1
+
+    def test_disable_imds_skips_query_and_shortens_dhcp_timeout(self):
+        """DisableIMDS skips the IMDS query and the extended DHCP timeout."""
+        ovf = construct_ovf_env(disable_imds=True)
+        md, ud, cfg = dsaz.read_azure_ovf(ovf)
+        self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+        self.mock_azure_get_metadata_from_fabric.return_value = []
+
+        self.azure_ds._check_and_get_data()
+
+        # IMDS is disabled: no IMDS query is made.
+        assert self.mock_readurl.mock_calls == []
+
+        # IMDS is disabled: do not wait 20 minutes for networking on its
+        # behalf even though provisioning is from ISO media.
+        assert self.mock_wrapping_setup_ephemeral_networking.mock_calls == [
+            mock.call(timeout_minutes=5)
+        ]
+
+        # Wireserver is still enabled, so report ready still occurs.
+        assert self.mock_azure_get_metadata_from_fabric.mock_calls == [
+            mock.call(
+                endpoint="10.11.12.13",
+                distro=self.azure_ds.distro,
+                iso_dev="/dev/sr0",
+                pubkey_info=None,
+            )
+        ]
 
     def test_no_pps_gpa(self):
         """test full provisioning scope when azure-proxy-agent
@@ -5457,6 +5513,43 @@ class TestReportFailure:
         assert mock_kvp_report_success_to_host.mock_calls == []
         assert mock_azure_report_failure_to_fabric.mock_calls == []
         assert mock_report_dmesg_to_kvp.mock_calls == [mock.call()]
+
+    @pytest.mark.parametrize("kvp_enabled", [False, True])
+    def test_disable_wireserver_skips_fabric_report(
+        self,
+        azure_ds,
+        kvp_enabled,
+        mock_azure_report_failure_to_fabric,
+        mock_kvp_report_via_kvp,
+        mock_report_dmesg_to_kvp,
+    ):
+        azure_ds._disable_wireserver = True
+        mock_kvp_report_via_kvp.return_value = kvp_enabled
+        error = errors.ReportableError(reason="foo")
+
+        assert azure_ds._report_failure(error) == kvp_enabled
+
+        assert mock_kvp_report_via_kvp.mock_calls == [
+            mock.call(error.as_encoded_report(vm_id=azure_ds._vm_id))
+        ]
+        assert mock_azure_report_failure_to_fabric.mock_calls == []
+
+
+class TestReportReady:
+    def test_disable_wireserver_skips_fabric(
+        self,
+        azure_ds,
+        mock_azure_get_metadata_from_fabric,
+        mock_kvp_report_success_to_host,
+        mock_report_dmesg_to_kvp,
+    ):
+        azure_ds._disable_wireserver = True
+        azure_ds._iso_dev = "/dev/sr0"
+
+        assert azure_ds._report_ready() is None
+        assert mock_azure_get_metadata_from_fabric.mock_calls == []
+        assert azure_ds._iso_dev is None
+        assert azure_ds._negotiated is True
 
 
 class TestValidateIMDSMetadata:

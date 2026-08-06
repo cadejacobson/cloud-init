@@ -1489,6 +1489,24 @@ class TestOvfEnvXml:
                     disable_imds=False,
                 ),
             ),
+            # Azure Stack DisableWireserver true.
+            (
+                construct_ovf_env(disable_wireserver=True),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_wireserver=True,
+                ),
+            ),
+            # Azure Stack DisableWireserver false.
+            (
+                construct_ovf_env(disable_wireserver=False),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_wireserver=False,
+                ),
+            ),
         ],
     )
     def test_valid_ovf_scenarios(self, ovf, expected):

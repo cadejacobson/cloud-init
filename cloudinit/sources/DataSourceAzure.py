@@ -343,6 +343,7 @@ class DataSourceAzure(sources.DataSource):
         self._route_configured_for_wireserver = False
         self._is_azure_stack = False
         self._disable_imds = False
+        self._disable_wireserver = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -359,6 +360,7 @@ class DataSourceAzure(sources.DataSource):
         self._route_configured_for_wireserver = False
         self._is_azure_stack = False
         self._disable_imds = False
+        self._disable_wireserver = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -709,16 +711,20 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
+        # Azure Stack may opt out of IMDS and/or Wireserver via ovf-env.xml.
+        self._disable_imds = bool(cfg.get("DisableIMDS"))
+        self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
         # not have UDF support.  In either case, require IMDS metadata.
         # If we require IMDS metadata, try harder to obtain networking, waiting
-        # for at least 20 minutes.  Otherwise only wait 5 minutes.
-        requires_imds_metadata = bool(self._iso_dev) or ovf_source is None
+        # for at least 20 minutes.  Otherwise only wait 5 minutes.  With IMDS
+        # disabled we never query it, so do not wait longer on its behalf.
+        requires_imds_metadata = not self._disable_imds and (
+            bool(self._iso_dev) or ovf_source is None
+        )
         timeout_minutes = 20 if requires_imds_metadata else 5
-
-        # Azure Stack may opt out of IMDS via the ovf-env.xml.
-        self._disable_imds = bool(cfg.get("DisableIMDS"))
         try:
             self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
         except NoDHCPLeaseError:
@@ -1432,6 +1438,14 @@ class DataSourceAzure(sources.DataSource):
         if host_only:
             return reported
 
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping failure report to Wireserver: DisableWireserver is "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return reported
+
         if self._is_ephemeral_networking_up():
             try:
                 report_diagnostic_event(
@@ -1491,6 +1505,17 @@ class DataSourceAzure(sources.DataSource):
         """
         report_dmesg_to_kvp()
         kvp.report_success_to_host(vm_id=self._vm_id)
+
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping Wireserver report ready: DisableWireserver is set "
+                "in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            # Reporting ready ejects OVF media; skip since we did not report.
+            self._iso_dev = None
+            self._negotiated = True
+            return None
 
         try:
             data = get_metadata_from_fabric(
@@ -2036,6 +2061,12 @@ def read_azure_ovf(contents):
     cfg["DisableIMDS"] = ovf_env.disable_imds
     report_diagnostic_event(
         "DisableIMDS: %s" % ovf_env.disable_imds,
+        logger_func=LOG.info,
+    )
+
+    cfg["DisableWireserver"] = ovf_env.disable_wireserver
+    report_diagnostic_event(
+        "DisableWireserver: %s" % ovf_env.disable_wireserver,
         logger_func=LOG.info,
     )
     return (md, ud, cfg)

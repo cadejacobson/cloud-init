@@ -1001,6 +1001,7 @@ class OvfEnvXml:
         preprovisioned_vm_type: Optional[str] = None,
         provision_guest_proxy_agent: bool = False,
         disable_imds: bool = False,
+        disable_wireserver: bool = False,
     ) -> None:
         self.username = username
         self.password = password
@@ -1012,6 +1013,7 @@ class OvfEnvXml:
         self.preprovisioned_vm_type = preprovisioned_vm_type
         self.provision_guest_proxy_agent = provision_guest_proxy_agent
         self.disable_imds = disable_imds
+        self.disable_wireserver = disable_wireserver
 
     def __eq__(self, other) -> bool:
         return self.__dict__ == other.__dict__
@@ -1176,6 +1178,13 @@ class OvfEnvXml:
         self.disable_imds = self._parse_property(
             section,
             "DisableIMDS",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+        self.disable_wireserver = self._parse_property(
+            section,
+            "DisableWireserver",
             parse_bool=True,
             default=False,
             required=False,
