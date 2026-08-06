@@ -1258,7 +1258,9 @@ dscheck_OVF() {
 
 is_azure_chassis() {
     local azure_chassis="7783-7084-3265-9085-8269-3286-77"
-    dmi_chassis_asset_tag_matches "${azure_chassis}"
+    local azure_stack_chassis="4860-8370-5222-2345-9626-0897-77"
+    dmi_chassis_asset_tag_matches "${azure_chassis}" ||
+        dmi_chassis_asset_tag_matches "${azure_stack_chassis}"
 }
 
 dscheck_Azure() {

@@ -341,6 +341,7 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._is_azure_stack = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -355,6 +356,7 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._is_azure_stack = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -914,6 +916,9 @@ class DataSourceAzure(sources.DataSource):
         """
         chassis_tag = identity.ChassisAssetTag.query_system()
         if chassis_tag is not None:
+            self._is_azure_stack = (
+                chassis_tag is identity.ChassisAssetTag.AZURE_STACK
+            )
             return True
 
         # If no valid chassis tag, check for seeded ovf-env.xml.

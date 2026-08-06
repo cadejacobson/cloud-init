@@ -554,6 +554,12 @@ class TestDsIdentify(DsIdentifyBase):
                 True,
                 id="azure_dmi_detection_from_chassis_asset_tag",
             ),
+            # Azure Stack is detected from its own DMI chassis-asset-tag
+            pytest.param(
+                "Azure-stack-dmi-detection",
+                True,
+                id="azure_stack_dmi_detection_from_chassis_asset_tag",
+            ),
             # Azure datasource is detected due to presence of a seed file.
             #
             # The seed file tested  is /var/lib/cloud/seed/azure/ovf-env.xml.
@@ -663,7 +669,7 @@ class TestDsIdentify(DsIdentifyBase):
             # Launched by os code always has config-2 disk.
             pytest.param("IBMCloud-config-2", True, id="ibmcloud_os_code"),
             # Test that Aliyun cloud is identified by product id.
-            pytest.param("AliYun", True, id="ibmcloud_os_code"),
+            pytest.param("AliYun", True, id="aliyun_found_by_product_id"),
             # On Intel, openstack must be identified.
             pytest.param(
                 "OpenStack", True, id="default_openstack_intel_is_found"
@@ -1634,6 +1640,10 @@ VALID_CFG = {
     "Azure-dmi-detection": {
         "ds": "Azure",
         "files": {P_CHASSIS_ASSET_TAG: "7783-7084-3265-9085-8269-3286-77\n"},
+    },
+    "Azure-stack-dmi-detection": {
+        "ds": "Azure",
+        "files": {P_CHASSIS_ASSET_TAG: "4860-8370-5222-2345-9626-0897-77\n"},
     },
     "Azure-seed-detection": {
         "ds": "Azure",
