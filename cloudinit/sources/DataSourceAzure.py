@@ -342,6 +342,7 @@ class DataSourceAzure(sources.DataSource):
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
         self._is_azure_stack = False
+        self._disable_imds = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -357,6 +358,7 @@ class DataSourceAzure(sources.DataSource):
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
         self._is_azure_stack = False
+        self._disable_imds = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -714,6 +716,9 @@ class DataSourceAzure(sources.DataSource):
         # for at least 20 minutes.  Otherwise only wait 5 minutes.
         requires_imds_metadata = bool(self._iso_dev) or ovf_source is None
         timeout_minutes = 20 if requires_imds_metadata else 5
+
+        # Azure Stack may opt out of IMDS via the ovf-env.xml.
+        self._disable_imds = bool(cfg.get("DisableIMDS"))
         try:
             self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
         except NoDHCPLeaseError:
@@ -860,6 +865,13 @@ class DataSourceAzure(sources.DataSource):
 
     @azure_ds_telemetry_reporter
     def get_metadata_from_imds(self, report_failure: bool) -> Dict:
+        if self._disable_imds:
+            report_diagnostic_event(
+                "Skipping IMDS query: DisableIMDS is set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return {}
+
         start_time = monotonic()
         retry_deadline = start_time + 300
 
@@ -2018,6 +2030,12 @@ def read_azure_ovf(contents):
     cfg["ProvisionGuestProxyAgent"] = ovf_env.provision_guest_proxy_agent
     report_diagnostic_event(
         "ProvisionGuestProxyAgent: %s" % ovf_env.provision_guest_proxy_agent,
+        logger_func=LOG.info,
+    )
+
+    cfg["DisableIMDS"] = ovf_env.disable_imds
+    report_diagnostic_event(
+        "DisableIMDS: %s" % ovf_env.disable_imds,
         logger_func=LOG.info,
     )
     return (md, ud, cfg)

@@ -433,6 +433,7 @@ def construct_ovf_env(
     preprovisioned_vm=None,
     preprovisioned_vm_type=None,
     provision_guest_proxy_agent=None,
+    disable_imds=None,
 ):
     content = [
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -511,6 +512,15 @@ def construct_ovf_env(
     content += [
         "</ns1:PlatformSettings>",
         "</ns1:PlatformSettingsSection>",
+    ]
+    if disable_imds is not None:
+        content += [
+            "<ns1:AzureStackConfigurationSection>",
+            "<ns1:DisableIMDS>%s</ns1:DisableIMDS>"
+            % str(disable_imds).lower(),
+            "</ns1:AzureStackConfigurationSection>",
+        ]
+    content += [
         "</ns0:Environment>",
     ]
 
@@ -2958,6 +2968,27 @@ class TestPreprovisioningReadAzureOvfFlag:
         cfg = ret[2]
         assert cfg["ProvisionGuestProxyAgent"] is False
 
+    def test_read_azure_ovf_with_disable_imds_true(self):
+        """read_azure_ovf sets DisableIMDS cfg flag to True."""
+        content = construct_ovf_env(disable_imds=True)
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableIMDS"] is True
+
+    def test_read_azure_ovf_with_disable_imds_false(self):
+        """read_azure_ovf sets DisableIMDS cfg flag to False."""
+        content = construct_ovf_env(disable_imds=False)
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableIMDS"] is False
+
+    def test_read_azure_ovf_without_disable_imds(self):
+        """read_azure_ovf defaults DisableIMDS cfg flag to False."""
+        content = construct_ovf_env()
+        ret = dsaz.read_azure_ovf(content)
+        cfg = ret[2]
+        assert cfg["DisableIMDS"] is False
+
 
 @pytest.mark.parametrize(
     "ovf_cfg,imds_md,pps_type",
@@ -5321,6 +5352,18 @@ class TestCheckAzureProxyAgent:
 
 
 class TestGetMetadataFromImds:
+    def test_disable_imds_skips_query(
+        self,
+        azure_ds,
+        mock_imds_fetch_metadata_with_api_fallback,
+        mock_wrapping_report_failure,
+    ):
+        azure_ds._disable_imds = True
+
+        assert azure_ds.get_metadata_from_imds(report_failure=True) == {}
+        assert mock_imds_fetch_metadata_with_api_fallback.mock_calls == []
+        assert mock_wrapping_report_failure.mock_calls == []
+
     @pytest.mark.parametrize("route_configured_for_imds", [False, True])
     @pytest.mark.parametrize("report_failure", [False, True])
     @pytest.mark.parametrize(

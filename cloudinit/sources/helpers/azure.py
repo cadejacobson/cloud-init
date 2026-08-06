@@ -1000,6 +1000,7 @@ class OvfEnvXml:
         preprovisioned_vm: bool = False,
         preprovisioned_vm_type: Optional[str] = None,
         provision_guest_proxy_agent: bool = False,
+        disable_imds: bool = False,
     ) -> None:
         self.username = username
         self.password = password
@@ -1010,6 +1011,7 @@ class OvfEnvXml:
         self.preprovisioned_vm = preprovisioned_vm
         self.preprovisioned_vm_type = preprovisioned_vm_type
         self.provision_guest_proxy_agent = provision_guest_proxy_agent
+        self.disable_imds = disable_imds
 
     def __eq__(self, other) -> bool:
         return self.__dict__ == other.__dict__
@@ -1036,6 +1038,7 @@ class OvfEnvXml:
         instance = OvfEnvXml()
         instance._parse_linux_configuration_set_section(root)
         instance._parse_platform_settings_section(root)
+        instance._parse_azure_stack_configuration_section(root)
 
         return instance
 
@@ -1157,6 +1160,22 @@ class OvfEnvXml:
         self.provision_guest_proxy_agent = self._parse_property(
             platform_settings,
             "ProvisionGuestProxyAgent",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+
+    def _parse_azure_stack_configuration_section(self, root):
+        """Parse the optional Azure Stack configuration section."""
+        section = self._find(
+            root, "AzureStackConfigurationSection", required=False
+        )
+        if section is None:
+            return
+
+        self.disable_imds = self._parse_property(
+            section,
+            "DisableIMDS",
             parse_bool=True,
             default=False,
             required=False,

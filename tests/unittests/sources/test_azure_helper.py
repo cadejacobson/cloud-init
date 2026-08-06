@@ -1471,6 +1471,24 @@ class TestOvfEnvXml:
                     preprovisioned_vm_type="testpps",
                 ),
             ),
+            # Azure Stack DisableIMDS true.
+            (
+                construct_ovf_env(disable_imds=True),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_imds=True,
+                ),
+            ),
+            # Azure Stack DisableIMDS false.
+            (
+                construct_ovf_env(disable_imds=False),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_imds=False,
+                ),
+            ),
         ],
     )
     def test_valid_ovf_scenarios(self, ovf, expected):
