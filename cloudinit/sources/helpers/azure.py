@@ -16,6 +16,8 @@ from typing import Callable, List, Optional, TypeVar, Union
 from xml.etree import ElementTree as ET  # nosec B405
 from xml.sax.saxutils import escape  # nosec B406
 
+import yaml
+
 from cloudinit import distros, subp, temp_utils, url_helper, util, version
 from cloudinit.reporting import events
 from cloudinit.sources.azure import errors
@@ -1077,7 +1079,7 @@ class OvfEnvXml:
         required: bool,
         decode_base64: bool = False,
         parse_bool: bool = False,
-        parse_json: bool = False,
+        parse_yaml: bool = False,
         default=None,
     ):
         matches = node.findall("./wa:" + name, OvfEnvXml.NAMESPACES)
@@ -1106,12 +1108,12 @@ class OvfEnvXml:
         if parse_bool:
             value = util.translate_bool(value)
 
-        if parse_json and value is not None:
+        if parse_yaml and value is not None:
             try:
-                value = json.loads(value)
-            except (ValueError, TypeError) as e:
+                value = yaml.safe_load(value)
+            except yaml.YAMLError as e:
                 raise errors.ReportableErrorOvfInvalidMetadata(
-                    "failed to parse %r as JSON" % name
+                    "failed to parse %r as YAML" % name
                 ) from e
 
         return value
@@ -1204,7 +1206,7 @@ class OvfEnvXml:
             section,
             "Network",
             decode_base64=True,
-            parse_json=True,
+            parse_yaml=True,
             required=False,
         )
 

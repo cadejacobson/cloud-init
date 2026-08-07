@@ -1614,7 +1614,7 @@ class TestOvfEnvXml:
             "multiple configuration matches for 'HostName' (2)"
         )
 
-    def test_invalid_network_json_fails(self):
+    def test_invalid_network_yaml_fails(self):
         ovf = """\
             <ns0:Environment xmlns="http://schemas.dmtf.org/ovf/environment/1"
              xmlns:ns0="http://schemas.dmtf.org/ovf/environment/1"
@@ -1635,7 +1635,7 @@ class TestOvfEnvXml:
             </ns1:PlatformSettings>
             </ns1:PlatformSettingsSection>
             <ns1:AzureStackConfigurationSection>
-            <ns1:Network>bm90LWpzb24=</ns1:Network>
+            <ns1:Network>ZXRoZXJuZXRzOiBbZXRoMA==</ns1:Network>
             </ns1:AzureStackConfigurationSection>
             </ns0:Environment>"""
 
@@ -1647,8 +1647,41 @@ class TestOvfEnvXml:
         assert (
             exc_info.value.reason
             == "unexpected metadata parsing ovf-env.xml: "
-            "failed to parse 'Network' as JSON"
+            "failed to parse 'Network' as YAML"
         )
+
+    def test_network_yaml_is_parsed(self):
+        # <Network> may be authored as native v2 YAML, not only JSON.
+        ovf = """\
+            <ns0:Environment xmlns="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns0="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns1="http://schemas.microsoft.com/windowsazure"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ns1:ProvisioningSection>
+            <ns1:LinuxProvisioningConfigurationSet>
+            <ns1:ConfigurationSetType>
+            LinuxProvisioningConfiguration
+            </ns1:ConfigurationSetType>
+            <ns1:HostName>test-host</ns1:HostName>
+            <ns1:UserName>test-user</ns1:UserName>
+            </ns1:LinuxProvisioningConfigurationSet>
+            </ns1:ProvisioningSection>
+            <ns1:PlatformSettingsSection>
+            <ns1:Version>1.0</ns1:Version>
+            <ns1:PlatformSettings>
+            </ns1:PlatformSettings>
+            </ns1:PlatformSettingsSection>
+            <ns1:AzureStackConfigurationSection>
+            <ns1:Network>dmVyc2lvbjogMgpldGhlcm5ldHM6CiAgZXRoMDoKICAgIGRoY3A0OiB0cnVlCg==</ns1:Network>
+            </ns1:AzureStackConfigurationSection>
+            </ns0:Environment>"""
+
+        ovf_env = azure_helper.OvfEnvXml.parse_text(ovf)
+
+        assert ovf_env.network == {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": True}},
+        }
 
     def test_non_azure_ovf(self):
         ovf = """\
