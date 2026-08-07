@@ -726,14 +726,25 @@ class DataSourceAzure(sources.DataSource):
         # If we require IMDS metadata, try harder to obtain networking, waiting
         # for at least 20 minutes.  Otherwise only wait 5 minutes.  With IMDS
         # disabled we never query it, so do not wait longer on its behalf.
-        requires_imds_metadata = not self._disable_imds and (
-            bool(self._iso_dev) or ovf_source is None
-        )
-        timeout_minutes = 20 if requires_imds_metadata else 5
-        try:
-            self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
-        except NoDHCPLeaseError:
-            pass
+        # Networking only exists to reach IMDS and/or Wireserver, so skip DHCP
+        # entirely when both are disabled.
+        if self._disable_imds and self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping DHCP setup: DisableIMDS and DisableWireserver are "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+        else:
+            requires_imds_metadata = not self._disable_imds and (
+                bool(self._iso_dev) or ovf_source is None
+            )
+            timeout_minutes = 20 if requires_imds_metadata else 5
+            try:
+                self._setup_ephemeral_networking(
+                    timeout_minutes=timeout_minutes
+                )
+            except NoDHCPLeaseError:
+                pass
 
         imds_md = {}
         if self._is_ephemeral_networking_up():

@@ -4280,6 +4280,25 @@ class TestProvisioning:
             )
         ]
 
+    def test_disable_imds_and_wireserver_skips_dhcp(self):
+        """With IMDS and Wireserver disabled, skip DHCP entirely."""
+        ovf = construct_ovf_env(disable_imds=True, disable_wireserver=True)
+        md, ud, cfg = dsaz.read_azure_ovf(ovf)
+        self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+
+        self.azure_ds._check_and_get_data()
+
+        # No DHCP is set up on behalf of IMDS or Wireserver.
+        assert self.mock_wrapping_setup_ephemeral_networking.mock_calls == []
+        assert self.mock_net_dhcp_maybe_perform_dhcp_discovery.mock_calls == []
+        assert self.azure_ds._is_ephemeral_networking_up() is False
+
+        # No IMDS query is made.
+        assert self.mock_readurl.mock_calls == []
+
+        # No report ready to Wireserver.
+        assert self.mock_azure_get_metadata_from_fabric.mock_calls == []
+
     def test_no_pps_gpa(self):
         """test full provisioning scope when azure-proxy-agent
         is enabled and running."""
