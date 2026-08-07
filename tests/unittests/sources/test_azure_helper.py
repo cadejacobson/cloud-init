@@ -1507,6 +1507,27 @@ class TestOvfEnvXml:
                     disable_wireserver=False,
                 ),
             ),
+            # Azure Stack native v2 network config.
+            (
+                construct_ovf_env(
+                    network={
+                        "version": 2,
+                        "ethernets": {
+                            "eth0": {"dhcp4": True},
+                        },
+                    },
+                ),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    network={
+                        "version": 2,
+                        "ethernets": {
+                            "eth0": {"dhcp4": True},
+                        },
+                    },
+                ),
+            ),
         ],
     )
     def test_valid_ovf_scenarios(self, ovf, expected):
@@ -1591,6 +1612,42 @@ class TestOvfEnvXml:
             exc_info.value.reason
             == "unexpected metadata parsing ovf-env.xml: "
             "multiple configuration matches for 'HostName' (2)"
+        )
+
+    def test_invalid_network_json_fails(self):
+        ovf = """\
+            <ns0:Environment xmlns="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns0="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns1="http://schemas.microsoft.com/windowsazure"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ns1:ProvisioningSection>
+            <ns1:LinuxProvisioningConfigurationSet>
+            <ns1:ConfigurationSetType>
+            LinuxProvisioningConfiguration
+            </ns1:ConfigurationSetType>
+            <ns1:HostName>test-host</ns1:HostName>
+            <ns1:UserName>test-user</ns1:UserName>
+            </ns1:LinuxProvisioningConfigurationSet>
+            </ns1:ProvisioningSection>
+            <ns1:PlatformSettingsSection>
+            <ns1:Version>1.0</ns1:Version>
+            <ns1:PlatformSettings>
+            </ns1:PlatformSettings>
+            </ns1:PlatformSettingsSection>
+            <ns1:AzureStackConfigurationSection>
+            <ns1:Network>bm90LWpzb24=</ns1:Network>
+            </ns1:AzureStackConfigurationSection>
+            </ns0:Environment>"""
+
+        with pytest.raises(
+            errors.ReportableErrorOvfInvalidMetadata
+        ) as exc_info:
+            azure_helper.OvfEnvXml.parse_text(ovf)
+
+        assert (
+            exc_info.value.reason
+            == "unexpected metadata parsing ovf-env.xml: "
+            "failed to parse 'Network' as JSON"
         )
 
     def test_non_azure_ovf(self):

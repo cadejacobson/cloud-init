@@ -1002,6 +1002,7 @@ class OvfEnvXml:
         provision_guest_proxy_agent: bool = False,
         disable_imds: bool = False,
         disable_wireserver: bool = False,
+        network: Optional[dict] = None,
     ) -> None:
         self.username = username
         self.password = password
@@ -1014,6 +1015,7 @@ class OvfEnvXml:
         self.provision_guest_proxy_agent = provision_guest_proxy_agent
         self.disable_imds = disable_imds
         self.disable_wireserver = disable_wireserver
+        self.network = network
 
     def __eq__(self, other) -> bool:
         return self.__dict__ == other.__dict__
@@ -1075,6 +1077,7 @@ class OvfEnvXml:
         required: bool,
         decode_base64: bool = False,
         parse_bool: bool = False,
+        parse_json: bool = False,
         default=None,
     ):
         matches = node.findall("./wa:" + name, OvfEnvXml.NAMESPACES)
@@ -1102,6 +1105,14 @@ class OvfEnvXml:
 
         if parse_bool:
             value = util.translate_bool(value)
+
+        if parse_json and value is not None:
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError) as e:
+                raise errors.ReportableErrorOvfInvalidMetadata(
+                    "failed to parse %r as JSON" % name
+                ) from e
 
         return value
 
@@ -1187,6 +1198,13 @@ class OvfEnvXml:
             "DisableWireserver",
             parse_bool=True,
             default=False,
+            required=False,
+        )
+        self.network = self._parse_property(
+            section,
+            "Network",
+            decode_base64=True,
+            parse_json=True,
             required=False,
         )
 

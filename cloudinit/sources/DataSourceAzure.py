@@ -335,6 +335,7 @@ class DataSourceAzure(sources.DataSource):
         )
         self._iso_dev = None
         self._network_config = None
+        self._ovf_network_config = None
         self._ephemeral_dhcp_ctx: Optional[EphemeralDHCPv4] = None
         self._reported_ready_marker_file = os.path.join(
             paths.cloud_dir, "data", "reported_ready"
@@ -353,6 +354,7 @@ class DataSourceAzure(sources.DataSource):
 
         self._ephemeral_dhcp_ctx = None
         self._iso_dev = None
+        self._ovf_network_config = None
         self._reported_ready_marker_file = os.path.join(
             self.paths.cloud_dir, "data", "reported_ready"
         )
@@ -714,6 +716,9 @@ class DataSourceAzure(sources.DataSource):
         # Azure Stack may opt out of IMDS and/or Wireserver via ovf-env.xml.
         self._disable_imds = bool(cfg.get("DisableIMDS"))
         self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+
+        # Azure Stack may provide a native v2 network config in ovf-env.xml.
+        self._ovf_network_config = cfg.get("Network")
 
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
@@ -1658,6 +1663,12 @@ class DataSourceAzure(sources.DataSource):
                     str(e),
                 )
 
+        # Use native v2 network config provided in ovf-env.xml, if configured.
+        if self._ovf_network_config and self.ds_cfg.get(
+            "apply_network_config"
+        ):
+            return self._ovf_network_config
+
         # Generate fallback configuration.
         try:
             return _generate_network_config_from_fallback_config()
@@ -2069,6 +2080,13 @@ def read_azure_ovf(contents):
         "DisableWireserver: %s" % ovf_env.disable_wireserver,
         logger_func=LOG.info,
     )
+
+    if ovf_env.network is not None:
+        cfg["Network"] = ovf_env.network
+        report_diagnostic_event(
+            "Network config provided in ovf-env.xml.",
+            logger_func=LOG.info,
+        )
     return (md, ud, cfg)
 
 

@@ -435,6 +435,7 @@ def construct_ovf_env(
     provision_guest_proxy_agent=None,
     disable_imds=None,
     disable_wireserver=None,
+    network=None,
 ):
     content = [
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -514,7 +515,11 @@ def construct_ovf_env(
         "</ns1:PlatformSettings>",
         "</ns1:PlatformSettingsSection>",
     ]
-    if disable_imds is not None or disable_wireserver is not None:
+    if (
+        disable_imds is not None
+        or disable_wireserver is not None
+        or network is not None
+    ):
         content.append("<ns1:AzureStackConfigurationSection>")
         if disable_imds is not None:
             content.append(
@@ -525,6 +530,10 @@ def construct_ovf_env(
             content.append(
                 "<ns1:DisableWireserver>%s</ns1:DisableWireserver>"
                 % str(disable_wireserver).lower()
+            )
+        if network is not None:
+            content.append(
+                "<ns1:Network>%s</ns1:Network>" % b64e(json.dumps(network))
             )
         content.append("</ns1:AzureStackConfigurationSection>")
     content += [
@@ -1082,6 +1091,61 @@ class TestNetworkConfig:
         del imds_metadata_missing_interface_metadata["network"]["interface"]
         mock_generate_fallback_config.return_value = self.fallback_config
         azure_ds._metadata_imds = imds_metadata_missing_interface_metadata
+
+        assert azure_ds.network_config == self.fallback_config
+
+    def test_uses_ovf_network_config_when_present(self, azure_ds):
+        """Native v2 network config from ovf-env.xml is used directly."""
+        ovf_network_config = {
+            "version": 2,
+            "ethernets": {
+                "eth0": {
+                    "dhcp4": False,
+                    "addresses": ["10.0.0.4/24"],
+                    "gateway4": "10.0.0.1",
+                },
+            },
+        }
+        azure_ds._metadata_imds = UNSET
+        azure_ds._ovf_network_config = ovf_network_config
+
+        assert azure_ds.network_config == ovf_network_config
+
+    def test_imds_network_config_takes_priority_over_ovf(
+        self, azure_ds, mock_get_interfaces
+    ):
+        """IMDS network metadata is preferred over ovf-env.xml network."""
+        expected = {
+            "ethernets": {
+                "eth0": {
+                    "dhcp4": True,
+                    "dhcp4-overrides": {"route-metric": 100},
+                    "dhcp6": False,
+                    "match": {"macaddress": "00:0d:3a:04:75:98"},
+                    "set-name": "eth0",
+                },
+            },
+            "version": 2,
+        }
+        azure_ds._metadata_imds = NETWORK_METADATA
+        azure_ds._ovf_network_config = {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": False}},
+        }
+
+        assert azure_ds.network_config == expected
+
+    def test_uses_fallback_cfg_when_apply_network_config_false_with_ovf(
+        self, azure_ds, mock_generate_fallback_config
+    ):
+        """Fallback config is used when apply_network_config is disabled."""
+        azure_ds.ds_cfg["apply_network_config"] = False
+        azure_ds._metadata_imds = UNSET
+        azure_ds._ovf_network_config = {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": True}},
+        }
+        mock_generate_fallback_config.return_value = self.fallback_config
 
         assert azure_ds.network_config == self.fallback_config
 
