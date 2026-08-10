@@ -2142,7 +2142,9 @@ def read_azure_ovf(contents, decryptor=None, defer_secrets=False):
     defuser = {}
     if ovf_env.username:
         defuser["name"] = ovf_env.username
-    if ovf_env.password:
+    if ovf_env.password and not defer_secrets:
+        # Skip while deferring: the password is still an encrypted token here
+        # and hashing it would fail. It is hashed after decryption instead.
         defuser["lock_passwd"] = False
         if DEF_PASSWD_REDACTION != ovf_env.password:
             defuser["hashed_passwd"] = encrypt_pass(ovf_env.password)

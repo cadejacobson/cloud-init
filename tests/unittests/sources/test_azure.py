@@ -3966,6 +3966,35 @@ class TestSecretDecryption:
         _md, ud, _cfg = dsaz.read_azure_ovf(ovf, defer_secrets=True)
         assert ud == "aaa.bbb.ccc"
 
+    def test_read_azure_ovf_defer_secrets_skips_password_hash(self):
+        """defer_secrets must not hash the still-encrypted adminPassword."""
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        )
+
+        with mock.patch.object(
+            dsaz,
+            "encrypt_pass",
+            side_effect=OSError(34, "Numerical result out of range"),
+        ) as m_encrypt:
+            _md, _ud, cfg = dsaz.read_azure_ovf(ovf, defer_secrets=True)
+
+        # The encrypted password is not hashed while deferring.
+        assert m_encrypt.mock_calls == []
+        default_user = cfg.get("system_info", {}).get("default_user", {})
+        assert "hashed_passwd" not in default_user
+        assert "lock_passwd" not in default_user
+
+        # Without deferral the encrypted password would be hashed (and crash).
+        with mock.patch.object(
+            dsaz,
+            "encrypt_pass",
+            side_effect=OSError(34, "Numerical result out of range"),
+        ) as m_encrypt:
+            with pytest.raises(OSError):
+                dsaz.read_azure_ovf(ovf)
+        assert m_encrypt.mock_calls == [mock.call("encrypted-pw")]
+
     def test_finalize_ovf_secrets_decrypts_when_flag_true(self, azure_ds):
         """Encrypted content is decrypted and persisted as plaintext."""
         azure_ds._secrets_provisioning_enabled = True
