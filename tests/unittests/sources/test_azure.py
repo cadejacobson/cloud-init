@@ -3854,12 +3854,12 @@ class TestSecretDecryption:
 
         assert exc_info.value.supporting_data["field"] == failing_field
 
-    def _capture_crawl_decryptor(self, azure_ds, sources):
-        """Run crawl_metadata over ``sources`` and capture decryptor args.
+    def _capture_crawl_defer_flags(self, azure_ds, sources):
+        """Run crawl_metadata over ``sources`` and capture the defer flag.
 
         Secrets provisioning is forced on, and ``load_azure_ds_dir`` is
-        stubbed to record the decryptor passed for each source before
-        aborting the crawl so no networking is attempted.
+        stubbed to record the ``defer_secrets`` flag passed for each source
+        before aborting the crawl so no networking is attempted.
         """
 
         class _StopCrawl(Exception):
@@ -3867,8 +3867,8 @@ class TestSecretDecryption:
 
         captured = []
 
-        def fake_load(src, decryptor=None):
-            captured.append((src, decryptor))
+        def fake_load(src, defer_secrets=False):
+            captured.append((src, defer_secrets))
             raise _StopCrawl
 
         with mock.patch.object(
@@ -3883,22 +3883,22 @@ class TestSecretDecryption:
 
         return captured
 
-    def test_crawl_cache_dir_source_skips_decryption(self, azure_ds):
-        """Reboot reads the cached OVF in data_dir without a decryptor."""
+    def test_crawl_cache_dir_source_does_not_defer(self, azure_ds):
+        """Reboot reads the cached OVF in data_dir without deferral."""
         ddir = azure_ds.ds_cfg["data_dir"]
 
-        captured = self._capture_crawl_decryptor(azure_ds, [ddir])
+        captured = self._capture_crawl_defer_flags(azure_ds, [ddir])
 
-        assert captured == [(ddir, None)]
+        assert captured == [(ddir, False)]
 
-    def test_crawl_live_media_source_uses_decryptor(self, azure_ds):
-        """Provisioning media is decrypted with the secrets decryptor."""
+    def test_crawl_live_media_source_defers_secrets(self, azure_ds):
+        """Provisioning media defers secret handling until IMDS is checked."""
         ddir = azure_ds.ds_cfg["data_dir"]
         media = os.path.join(os.path.dirname(ddir), "live-provisioning-seed")
 
-        captured = self._capture_crawl_decryptor(azure_ds, [media, ddir])
+        captured = self._capture_crawl_defer_flags(azure_ds, [media, ddir])
 
-        assert captured == [(media, dsaz.cvm.unprotect_secret)]
+        assert captured == [(media, True)]
 
     def test_persist_decrypted_custom_data_rewrites_plaintext(self):
         """CustomData is rewritten to base64 plaintext of the user-data."""
@@ -3939,6 +3939,117 @@ class TestSecretDecryption:
         # Reboot: the cache dir is read without a decryptor.
         _md2, ud2, _cfg2 = dsaz.read_azure_ovf(cached, decryptor=None)
         assert ud2 == b"plain-userdata"
+
+    def test_read_azure_ovf_defer_secrets_keeps_encrypted_fields(self):
+        """defer_secrets leaves customData/password unprocessed."""
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="a" * 200
+        )
+
+        _md, ud, _cfg = dsaz.read_azure_ovf(ovf, defer_secrets=True)
+
+        # CustomData kept as the raw token (not decoded), and the over-length
+        # password did not trip the length check.
+        assert ud == b64e("encrypted-cd")
+
+    def test_read_azure_ovf_defer_secrets_skips_base64_decode(self):
+        """defer_secrets skips base64-decode so an encrypted token survives."""
+        ovf = construct_ovf_env(custom_data="x").replace(
+            b64e("x"), "aaa.bbb.ccc"
+        )
+
+        # Without deferral the token is not valid base64 (E6); deferral keeps
+        # it untouched for later decryption.
+        with pytest.raises(errors.ReportableErrorOvfInvalidBase64):
+            dsaz.read_azure_ovf(ovf)
+
+        _md, ud, _cfg = dsaz.read_azure_ovf(ovf, defer_secrets=True)
+        assert ud == "aaa.bbb.ccc"
+
+    def test_finalize_ovf_secrets_decrypts_when_flag_true(self, azure_ds):
+        """Encrypted content is decrypted and persisted as plaintext."""
+        azure_ds._secrets_provisioning_enabled = True
+        ovf = construct_ovf_env(
+            custom_data="encrypted-cd", password="encrypted-pw"
+        ).encode("utf-8")
+        imds_md = {"extended": {"compute": {"isContentCpsEncrypted": "true"}}}
+
+        with mock.patch.object(
+            dsaz.cvm,
+            "unprotect_secret",
+            side_effect=lambda field, token: {
+                "customData": b64e("plain-userdata"),
+                "adminPassword": "plain-password",
+            }[field],
+        ) as m_unprotect:
+            _md, ud, _cfg, files = azure_ds._finalize_ovf_secrets(ovf, imds_md)
+
+        assert ud == b"plain-userdata"
+        assert m_unprotect.call_count == 2
+        # Cached OVF now decodes to plaintext without a decryptor (reboot).
+        _md2, ud2, _cfg2 = dsaz.read_azure_ovf(files["ovf-env.xml"])
+        assert ud2 == b"plain-userdata"
+
+    def test_finalize_ovf_secrets_plaintext_when_flag_false(self, azure_ds):
+        """IMDS says content is not encrypted -> read as plaintext base64."""
+        azure_ds._secrets_provisioning_enabled = True
+        ovf = construct_ovf_env(custom_data="plain-userdata").encode("utf-8")
+        imds_md = {"extended": {"compute": {"isContentCpsEncrypted": "false"}}}
+
+        with mock.patch.object(dsaz.cvm, "unprotect_secret") as m_unprotect:
+            _md, ud, _cfg, _files = azure_ds._finalize_ovf_secrets(
+                ovf, imds_md
+            )
+
+        assert ud == b"plain-userdata"
+        assert m_unprotect.mock_calls == []
+
+
+@pytest.mark.parametrize(
+    "imds_md,expected",
+    [
+        ({"extended": {"compute": {"isContentCpsEncrypted": True}}}, True),
+        ({"extended": {"compute": {"isContentCpsEncrypted": "true"}}}, True),
+        ({"extended": {"compute": {"isContentCpsEncrypted": "True"}}}, True),
+        ({"extended": {"compute": {"isContentCpsEncrypted": False}}}, False),
+        ({"extended": {"compute": {"isContentCpsEncrypted": "false"}}}, False),
+        ({"extended": {"compute": {}}}, False),
+        ({"extended": None}, False),
+        ({}, False),
+    ],
+)
+def test_content_cps_encrypted_from_imds(imds_md, expected):
+    assert dsaz._content_cps_encrypted_from_imds(imds_md) is expected
+
+
+class TestShouldDecryptSecrets:
+    @pytest.mark.parametrize(
+        "enabled,imds_md,expected",
+        [
+            (
+                True,
+                {"extended": {"compute": {"isContentCpsEncrypted": "true"}}},
+                True,
+            ),
+            (
+                True,
+                {"extended": {"compute": {"isContentCpsEncrypted": "false"}}},
+                False,
+            ),
+            (True, {}, False),
+            (
+                False,
+                {"extended": {"compute": {"isContentCpsEncrypted": "true"}}},
+                False,
+            ),
+        ],
+    )
+    def test_should_decrypt_secrets(
+        self, azure_ds, enabled, imds_md, expected
+    ):
+        azure_ds._secrets_provisioning_enabled = enabled
+
+        assert azure_ds._should_decrypt_secrets(imds_md) is expected
 
 
 class TestProvisioning:

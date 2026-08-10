@@ -691,6 +691,43 @@ class DataSourceAzure(sources.DataSource):
             return None
         return cvm.unprotect_secret
 
+    def _should_decrypt_secrets(self, imds_md: dict) -> bool:
+        """Whether ovf-env.xml secrets should be decrypted.
+
+        Combines the existing secrets-provisioning checks (CVM detection, tool
+        presence, and ``is-secrets-provisioning-enabled``, folded into
+        ``_secrets_provisioning_enabled``) with the extended IMDS flag
+        ``isContentCpsEncrypted``. Both must hold before we decrypt.
+        """
+        return (
+            self._secrets_provisioning_enabled
+            and _content_cps_encrypted_from_imds(imds_md)
+        )
+
+    def _finalize_ovf_secrets(self, contents, imds_md: dict):
+        """Resolve deferred ovf-env.xml secrets now that IMDS is available.
+
+        Decrypts customData and adminPassword only when both secrets
+        provisioning and the IMDS ``isContentCpsEncrypted`` flag agree;
+        otherwise reads customData as plaintext base64. Decrypted CustomData
+        is persisted into the cached OVF so a later reboot (read without a
+        decryptor) does not fail on a stale encrypted token.
+        """
+        should_decrypt = self._should_decrypt_secrets(imds_md)
+        report_diagnostic_event(
+            "IMDS isContentCpsEncrypted=%s; %s ovf-env.xml secrets"
+            % (
+                _content_cps_encrypted_from_imds(imds_md),
+                "decrypting" if should_decrypt else "reading as plaintext",
+            ),
+            logger_func=LOG.info,
+        )
+        decryptor = self._get_secret_decryptor() if should_decrypt else None
+        md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
+        if decryptor is not None:
+            contents = _persist_decrypted_custom_data(contents, ud)
+        return md, ud, cfg, {"ovf-env.xml": contents}
+
     @azure_ds_telemetry_reporter
     def crawl_metadata(self):
         """Walk all instance metadata sources returning a dict on success.
@@ -722,35 +759,32 @@ class DataSourceAzure(sources.DataSource):
         userdata_raw = ""
         files = {}
 
-        # On the CVM secrets path, ovf-env.xml customData and adminPassword
-        # are encrypted; this decrypts them as the OVF is read. None off the
-        # secrets path, leaving the fields untouched.
-        secret_decryptor = self._get_secret_decryptor()
-
         for src in list_possible_azure_ds(self.seed_dir, ddir):
-            # Only decrypt secrets when reading live provisioning media. The
-            # cached OVF in ddir is written after provisioning (with the
-            # password redacted and customData left encrypted), so re-running
-            # the decryptor on reboot would fail. Read the cached copy as-is.
-            source_decryptor = None if src == ddir else secret_decryptor
+            # On the CVM secrets path, defer decryption of live provisioning
+            # media so it can be gated on IMDS (see below). The cached OVF in
+            # ddir is written with customData already in plaintext, so it is
+            # read as-is (no deferral) on reboot.
+            source_defer_secrets = (
+                self._secrets_provisioning_enabled and src != ddir
+            )
             try:
                 if src.startswith("/dev/"):
                     if util.is_FreeBSD():
                         md, userdata_raw, cfg, files = util.mount_cb(
                             src,
                             load_azure_ds_dir,
-                            data=source_decryptor,
+                            data=source_defer_secrets,
                             mtype="udf",
                         )
                     else:
                         md, userdata_raw, cfg, files = util.mount_cb(
-                            src, load_azure_ds_dir, data=source_decryptor
+                            src, load_azure_ds_dir, data=source_defer_secrets
                         )
                     # save the device for ejection later
                     self._iso_dev = src
                 else:
                     md, userdata_raw, cfg, files = load_azure_ds_dir(
-                        src, source_decryptor
+                        src, source_defer_secrets
                     )
 
                 ovf_source = src
@@ -778,6 +812,14 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
+        # Live provisioning media on the secrets path is read but not yet
+        # decrypted; the decision is deferred until IMDS is consulted below.
+        secrets_deferred = (
+            self._secrets_provisioning_enabled
+            and ovf_source is not None
+            and ovf_source != ddir
+        )
+
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
         # not have UDF support.  In either case, require IMDS metadata.
@@ -804,6 +846,14 @@ class DataSourceAzure(sources.DataSource):
             report_diagnostic_event(msg)
             raise sources.InvalidMetaDataException(msg)
 
+        # Now that IMDS is available, finalize the deferred OVF secrets:
+        # decrypt only when the extended IMDS flag confirms encrypted content,
+        # otherwise read customData as plaintext base64.
+        if secrets_deferred:
+            md, userdata_raw, cfg, files = self._finalize_ovf_secrets(
+                files["ovf-env.xml"], imds_md
+            )
+
         # Refresh PPS type using metadata.
         pps_type = self._determine_pps_type(cfg, imds_md)
         if pps_type != PPSType.NONE:
@@ -827,7 +877,7 @@ class DataSourceAzure(sources.DataSource):
             else:
                 self._wait_for_pps_unknown_reuse()
 
-            md, userdata_raw, cfg, files = self._reprovision()
+            md, userdata_raw, cfg, files = self._reprovision(imds_md)
             if cfg.get("ProvisionGuestProxyAgent"):
                 self._check_azure_proxy_agent_status()
 
@@ -1607,10 +1657,14 @@ class DataSourceAzure(sources.DataSource):
         return pps_type
 
     @azure_ds_telemetry_reporter
-    def _reprovision(self):
+    def _reprovision(self, imds_md: dict):
         """Initiate the reprovisioning workflow.
 
         Ephemeral networking is up upon successful reprovisioning.
+
+        :param imds_md: pre-reprovision IMDS metadata used to gate secret
+            decryption. As a temporary workaround this reuses the flag from
+            before reprovisioning rather than re-fetching post-reprovision.
         """
         contents = self._poll_imds()
         with events.ReportEventStack(
@@ -1623,7 +1677,11 @@ class DataSourceAzure(sources.DataSource):
             Path("/run/cloud-init/ovf-env.xml-reprovision").write_bytes(
                 contents
             )
-            decryptor = self._get_secret_decryptor()
+            decryptor = (
+                self._get_secret_decryptor()
+                if self._should_decrypt_secrets(imds_md)
+                else None
+            )
             md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
             if decryptor is not None:
                 # Persist decrypted CustomData as plaintext so a later reboot
@@ -1799,6 +1857,22 @@ def _disable_password_from_imds(imds_data):
         )
     except KeyError:
         return None
+
+
+def _content_cps_encrypted_from_imds(imds_data) -> bool:
+    """Whether IMDS marks the provisioning content as CPS-encrypted.
+
+    Reads the extended IMDS flag ``isContentCpsEncrypted``; absent or
+    unparsable means not encrypted. IMDS extended booleans may arrive as the
+    strings "true"/"false".
+    """
+    try:
+        value = imds_data["extended"]["compute"]["isContentCpsEncrypted"]
+    except (KeyError, TypeError):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
 
 
 def _key_is_openssh_formatted(key):
@@ -2022,12 +2096,15 @@ def write_files(datadir, files, dirmode=None):
 
 
 @azure_ds_telemetry_reporter
-def read_azure_ovf(contents, decryptor=None):
+def read_azure_ovf(contents, decryptor=None, defer_secrets=False):
     """Parse OVF XML contents.
 
     :param decryptor: optional callable ``(field, token) -> plaintext`` used
         to decrypt the encrypted customData and adminPassword fields on the
         CVM secrets-provisioning path. None off the secrets path.
+    :param defer_secrets: when True, leave the encrypted customData and
+        adminPassword tokens untouched so the decrypt decision can be made
+        after IMDS is consulted.
 
     :return: Tuple of metadata, configuration, userdata dicts.
 
@@ -2044,7 +2121,9 @@ def read_azure_ovf(contents, decryptor=None):
         if isinstance(contents, bytes)
         else contents,
     )
-    ovf_env = OvfEnvXml.parse_text(contents, decryptor=decryptor)
+    ovf_env = OvfEnvXml.parse_text(
+        contents, decryptor=decryptor, defer_secrets=defer_secrets
+    )
     md: Dict[str, Any] = {}
     cfg = {}
     ud = ovf_env.custom_data or ""
@@ -2179,7 +2258,7 @@ def list_possible_azure_ds(seed, cache_dir):
 
 
 @azure_ds_telemetry_reporter
-def load_azure_ds_dir(source_dir, decryptor=None):
+def load_azure_ds_dir(source_dir, defer_secrets=False):
     ovf_file = os.path.join(source_dir, "ovf-env.xml")
 
     if not os.path.isfile(ovf_file):
@@ -2217,11 +2296,9 @@ def load_azure_ds_dir(source_dir, decryptor=None):
     except Exception:
         LOG.warning("Failed to capture provisioning media", exc_info=True)
 
-    md, ud, cfg = read_azure_ovf(contents, decryptor=decryptor)
-    if decryptor is not None:
-        # Persist decrypted CustomData as plaintext so reboots (which read
-        # this cache without a decryptor) do not fail on the encrypted token.
-        contents = _persist_decrypted_custom_data(contents, ud)
+    md, ud, cfg = read_azure_ovf(contents, defer_secrets=defer_secrets)
+    # Secrets are decrypted after IMDS is consulted, so the raw (possibly
+    # still-encrypted) contents are returned unchanged here.
     return (md, ud, cfg, {"ovf-env.xml": contents})
 
 
