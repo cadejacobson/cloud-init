@@ -5,12 +5,20 @@ from unittest import mock
 import pytest
 
 from cloudinit import subp
-from cloudinit.sources.azure import cvm, errors
+from cloudinit.sources.azure import cvm, errors, identity
 
 # CPUID register tuples (eax, ebx, ecx, edx) keyed by leaf, used to drive
 # the mocked _cpuid() in the native-detection tests.
 _HV_VENDOR_REGS = (cvm._HV_ISOLATION_LEAF,) + cvm._HV_VENDOR
 _NON_HV_VENDOR_REGS = (cvm._HV_ISOLATION_LEAF, 0x0, 0x0, 0x0)
+
+
+@pytest.fixture(autouse=True)
+def mock_query_vm_id():
+    # Constructing a ReportableError reads the VM id, which otherwise falls
+    # back to dmidecode via subp. Stub it so error paths stay hermetic.
+    with mock.patch.object(identity, "query_vm_id", return_value="vm-id"):
+        yield
 
 
 def _isolation_regs(isolation_type: int):
@@ -270,7 +278,7 @@ class TestUnprotectSecret:
             data="encrypted-token",
         )
 
-    def test_failure_logs_and_returns_original_token(self, mock_subp, caplog):
+    def test_failure_raises_reportable_error(self, mock_subp):
         mock_subp.side_effect = subp.ProcessExecutionError(
             cmd=[cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "0"],
             exit_code=1,
@@ -278,8 +286,14 @@ class TestUnprotectSecret:
             stderr="bad token",
         )
 
-        with caplog.at_level("ERROR"):
-            result = cvm.unprotect_secret("adminPassword", "encrypted-token")
+        with pytest.raises(
+            errors.ReportableErrorSecretDecryptionFailure
+        ) as exc_info:
+            cvm.unprotect_secret("adminPassword", "encrypted-token")
 
-        assert result == "encrypted-token"
-        assert "unprotect-secret failed for field=adminPassword" in caplog.text
+        error = exc_info.value
+        assert error.supporting_data["field"] == "adminPassword"
+        assert error.supporting_data["exit_code"] == 1
+        assert error.supporting_data["stderr"] == "bad token"
+        # stdout must never be surfaced (it is the plaintext secret).
+        assert "stdout" not in error.supporting_data

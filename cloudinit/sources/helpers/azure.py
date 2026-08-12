@@ -1003,7 +1003,6 @@ class OvfEnvXml:
         cls,
         ovf_env_xml: str,
         decryptor: Optional[Callable[[str, str], str]] = None,
-        defer_secrets: bool = False,
     ) -> "OvfEnvXml":
         """Parser for ovf-env.xml data.
 
@@ -1011,10 +1010,6 @@ class OvfEnvXml:
             used to decrypt the encrypted customData and adminPassword fields
             when CVM secrets provisioning is enabled. When None (the default),
             the fields are read as-is.
-        :param defer_secrets: when True, leave the encrypted customData and
-            adminPassword tokens untouched (no base64-decode, length check, or
-            decryption) so the decision to decrypt can be made after IMDS is
-            consulted.
         :raises NonAzureDataSource: if XML is not in Azure's format.
         :raises errors.ReportableErrorOvfParsingException: if XML is
                 unparsable or invalid.
@@ -1031,9 +1026,7 @@ class OvfEnvXml:
             )
 
         instance = OvfEnvXml()
-        instance._parse_linux_configuration_set_section(
-            root, decryptor, defer_secrets
-        )
+        instance._parse_linux_configuration_set_section(root, decryptor)
         instance._parse_platform_settings_section(root)
 
         return instance
@@ -1098,9 +1091,7 @@ class OvfEnvXml:
 
         return value
 
-    def _parse_linux_configuration_set_section(
-        self, root, decryptor=None, defer_secrets=False
-    ):
+    def _parse_linux_configuration_set_section(self, root, decryptor=None):
         provisioning_section = self._find(
             root, "ProvisioningSection", required=True
         )
@@ -1117,10 +1108,6 @@ class OvfEnvXml:
         )
         if raw_custom_data is None:
             self.custom_data = None
-        elif defer_secrets:
-            # Secrets provisioning: leave the encrypted CustomData token as-is
-            # until IMDS confirms whether the content is encrypted.
-            self.custom_data = raw_custom_data
         else:
             if decryptor is not None:
                 # Secrets provisioning: CustomData holds an encrypted JWT.
@@ -1140,7 +1127,7 @@ class OvfEnvXml:
         self.password = self._parse_property(
             config_set, "UserPassword", required=False
         )
-        if self.password is not None and not defer_secrets:
+        if self.password is not None:
             if decryptor is not None:
                 # Secrets provisioning: UserPassword holds an encrypted JWT.
                 self.password = decryptor("adminPassword", self.password)
