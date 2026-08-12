@@ -4201,7 +4201,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 timeout=30,
                 headers_cb=imds.headers_cb,
                 exception_cb=mock.ANY,
@@ -4286,7 +4286,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 timeout=30,
                 headers_cb=imds.headers_cb,
                 exception_cb=mock.ANY,
@@ -4376,7 +4376,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 timeout=30,
                 headers_cb=imds.headers_cb,
                 exception_cb=mock.ANY,
@@ -4450,7 +4450,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4468,7 +4468,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4519,7 +4519,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4537,7 +4537,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4646,7 +4646,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4664,7 +4664,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4770,7 +4770,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4788,7 +4788,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4906,7 +4906,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -4924,7 +4924,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5064,7 +5064,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5082,7 +5082,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5176,7 +5176,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5194,7 +5194,7 @@ class TestProvisioning:
             ),
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5302,7 +5302,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 exception_cb=mock.ANY,
                 headers_cb=imds.headers_cb,
                 infinite=True,
@@ -5365,7 +5365,7 @@ class TestProvisioning:
         assert self.mock_readurl.mock_calls == [
             mock.call(
                 "http://169.254.169.254/metadata/instance?"
-                "api-version=2021-08-01&extended=true",
+                "api-version=2026-06-23&extended=true",
                 timeout=30,
                 headers_cb=imds.headers_cb,
                 exception_cb=mock.ANY,

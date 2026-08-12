@@ -148,9 +148,10 @@ def is_secrets_provisioning_enabled() -> bool:
 def unprotect_secret(field: str, token: str) -> str:
     """Decrypt a single ovf-env.xml secret via azure-protected-secrets-tool.
 
-    Runs ``unprotect-secret --policy 3`` (require both signature and
-    encryption) with the encrypted ``token`` piped on stdin and returns the
-    decrypted plaintext, which the tool writes to stdout.
+    Runs ``unprotect-secret --policy 0`` (the strictest policy: require all
+    protections; policy 3 permits legacy) with the encrypted ``token`` piped
+    on stdin and returns the decrypted plaintext, which the tool writes to
+    stdout.
 
     The return value -- and the subprocess output -- is the plaintext secret
     and must never be logged.

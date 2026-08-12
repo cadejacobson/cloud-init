@@ -136,7 +136,7 @@ def regex_for_http_error(error):
 class TestHeaders:
     default_url = (
         "http://169.254.169.254/metadata/instance?"
-        "api-version=2021-08-01&extended=true"
+        "api-version=2026-06-23&extended=true"
     )
 
     def test_headers_cb(self):
@@ -155,10 +155,10 @@ class TestHeaders:
 class TestFetchMetadataWithApiFallback:
     default_url = (
         "http://169.254.169.254/metadata/instance?"
-        "api-version=2021-08-01&extended=true"
+        "api-version=2026-06-23&extended=true"
     )
     fallback_url = (
-        "http://169.254.169.254/metadata/instance?api-version=2019-06-01"
+        "http://169.254.169.254/metadata/instance?api-version=2021-08-01"
     )
 
     # Early versions of responses do not appreciate the parameters...
@@ -275,7 +275,7 @@ class TestFetchMetadataWithApiFallback:
             (
                 LOG_PATH,
                 logging.WARNING,
-                "Falling back to IMDS api-version: 2019-06-01",
+                "Falling back to IMDS api-version: 2021-08-01",
             ),
             (
                 "cloudinit.url_helper",
@@ -418,7 +418,7 @@ class TestFetchMetadataWithApiFallback:
             (
                 LOG_PATH,
                 logging.WARNING,
-                "Falling back to IMDS api-version: 2019-06-01",
+                "Falling back to IMDS api-version: 2021-08-01",
             ),
             (
                 "cloudinit.url_helper",

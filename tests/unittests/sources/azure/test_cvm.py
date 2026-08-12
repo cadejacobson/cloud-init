@@ -266,13 +266,13 @@ class TestUnprotectSecret:
             == "plaintext-secret"
         )
         mock_subp.assert_called_once_with(
-            [cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            [cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "0"],
             data="encrypted-token",
         )
 
     def test_failure_logs_and_returns_original_token(self, mock_subp, caplog):
         mock_subp.side_effect = subp.ProcessExecutionError(
-            cmd=[cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "3"],
+            cmd=[cvm.SECRETS_TOOL, "unprotect-secret", "--policy", "0"],
             exit_code=1,
             stdout="leaked-secret",
             stderr="bad token",
