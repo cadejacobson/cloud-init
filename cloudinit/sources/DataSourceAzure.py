@@ -6,15 +6,12 @@
 
 import base64
 import functools
-import json
 import logging
 import os
 import os.path
 import re
-import shutil
 import socket
 import xml.etree.ElementTree as ET  # nosec B405
-import zipfile
 from enum import Enum
 from pathlib import Path
 from time import monotonic, sleep, time
@@ -996,8 +993,6 @@ class DataSourceAzure(sources.DataSource):
         error_string: Optional[str] = None
         error_report: Optional[errors.ReportableError] = None
         try:
-            # DEBUG: DO NOT MERGE -- intentionally writes/logs IMDS metadata
-            # in the clear to diagnose provisioning. Remove before production.
             if self._secrets_provisioning_enabled:
                 md_raw, md = imds.fetch_metadata_and_raw_with_api_fallback(
                     max_connection_errors=max_connection_errors,
@@ -1009,10 +1004,6 @@ class DataSourceAzure(sources.DataSource):
                     max_connection_errors=max_connection_errors,
                     retry_deadline=retry_deadline,
                 )
-            Path("/run/cloud-init/imds.json").write_text(
-                json.dumps(md, indent=2)
-            )
-            LOG.warning("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
             # On the CVM secrets path, validate the signed IMDS metadata
             # (SignatureInfo) against the raw bytes before applying it. A
             # failure raises E5, which propagates to _get_data as a fatal
@@ -1672,11 +1663,6 @@ class DataSourceAzure(sources.DataSource):
             description="read azure ovf during reprovisioning",
             parent=azure_ds_reporter,
         ):
-            # DEBUG: DO NOT MERGE -- dumps raw reprovision OVF (may contain
-            # secrets) to diagnose provisioning. Remove before production.
-            Path("/run/cloud-init/ovf-env.xml-reprovision").write_bytes(
-                contents
-            )
             decryptor = (
                 self._get_secret_decryptor()
                 if self._should_decrypt_secrets(imds_md)
@@ -2268,35 +2254,6 @@ def load_azure_ds_dir(source_dir, defer_secrets=False):
 
     with open(ovf_file, "rb") as fp:
         contents = fp.read()
-
-    # DEBUG: DO NOT MERGE -- dumps raw provisioning media (may contain
-    # secrets) to diagnose provisioning. Remove before production.
-    Path("/run/cloud-init/ovf-env.xml").write_bytes(contents)
-
-    # Capture full provisioning media contents to a zip for analysis.
-    # The media is only mounted briefly during datasource setup, so
-    # this must happen here before mount_cb unmounts it.
-    # Save to both /run (tmpfs, quick access) and /var/log/azure (persistent).
-    capture_dir = Path("/run/cloud-init/ovf-media")
-    capture_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = capture_dir / "ovf-media.zip"
-    persist_dir = Path("/var/log/azure")
-    persist_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _dirs, files in os.walk(source_dir):
-                for fname in files:
-                    fpath = os.path.join(root, fname)
-                    arcname = os.path.relpath(fpath, source_dir)
-                    zf.write(fpath, arcname)
-        shutil.copy2(str(zip_path), str(persist_dir / "ovf-media.zip"))
-        LOG.warning(
-            "Captured provisioning media to %s (%d bytes)",
-            zip_path,
-            zip_path.stat().st_size,
-        )
-    except Exception:
-        LOG.warning("Failed to capture provisioning media", exc_info=True)
 
     md, ud, cfg = read_azure_ovf(contents, defer_secrets=defer_secrets)
     # Secrets are decrypted after IMDS is consulted, so the raw (possibly
