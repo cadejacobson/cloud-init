@@ -3827,7 +3827,9 @@ class TestSecretDecryption:
         ]
 
     @pytest.mark.parametrize("failing_field", ["customData", "adminPassword"])
-    def test_read_azure_ovf_decrypt_failure_propagates(self, failing_field):
+    def test_read_azure_ovf_decrypt_failure_propagates(
+        self, failing_field, mock_dmi_read_dmi_data
+    ):
         """A decryption failure surfaces as a reportable error (E2/E3)."""
 
         def fake_decrypt(field, token):
@@ -3952,7 +3954,9 @@ class TestSecretDecryption:
         # password did not trip the length check.
         assert ud == b64e("encrypted-cd")
 
-    def test_read_azure_ovf_defer_secrets_skips_base64_decode(self):
+    def test_read_azure_ovf_defer_secrets_skips_base64_decode(
+        self, mock_dmi_read_dmi_data
+    ):
         """defer_secrets skips base64-decode so an encrypted token survives."""
         ovf = construct_ovf_env(custom_data="x").replace(
             b64e("x"), "aaa.bbb.ccc"

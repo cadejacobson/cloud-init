@@ -2097,16 +2097,6 @@ def read_azure_ovf(contents, decryptor=None, defer_secrets=False):
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
-    # DEBUG: DO NOT MERGE -- logs raw ovf-env.xml (may contain secrets, and
-    # reveals whether adminPassword arrived encrypted) to diagnose
-    # provisioning. Logged before parse so it survives a parse/decrypt
-    # failure. Remove before production.
-    LOG.warning(
-        "Reading ovf-env.xml: %s",
-        contents.decode("utf-8", "ignore")
-        if isinstance(contents, bytes)
-        else contents,
-    )
     ovf_env = OvfEnvXml.parse_text(
         contents, decryptor=decryptor, defer_secrets=defer_secrets
     )
