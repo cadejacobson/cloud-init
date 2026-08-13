@@ -277,9 +277,16 @@ def test_imds_invalid_metadata():
 
 
 def test_required_secrets_tool_not_found():
-    error = errors.ReportableErrorRequiredSecretsToolNotFound()
+    error = errors.ReportableErrorRequiredSecretsToolNotFound(
+        require_azure_cvm_secrets_provisioning=True,
+        is_cvm=True,
+    )
 
     assert error.reason == "required azure-protected-secrets-tool not found"
+    assert error.supporting_data == {
+        "require_azure_cvm_secrets_provisioning": True,
+        "is_cvm": True,
+    }
 
 
 def test_secrets_tool_failure():

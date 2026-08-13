@@ -54,14 +54,6 @@ The settings that may be configured are:
   A dictionary defining which device paths should be interpreted as ephemeral
   images. See :ref:`cc_disk_setup <mod_cc_disk_setup>` module for more info.
 
-* :command:`require_azure_protected_secrets_tool`
-
-  Boolean that only takes effect on a Confidential VM (CVM) where the
-  ``azure-protected-secrets-tool`` is needed but unusable (CVM isolation is
-  undetermined, or a confirmed CVM has the tool absent). When True, such a
-  case is fatal. When False, cloud-init falls back to best-effort normal
-  provisioning. Has no effect on a definite non-CVM. Default is False.
-
 * :command:`require_azure_cvm_secrets_provisioning`
 
   Boolean that enables the Confidential VM (CVM) secrets-provisioning path,
@@ -85,7 +77,6 @@ An example configuration with the default values is provided below:
        data_dir: /var/lib/waagent
        disk_aliases:
          ephemeral0: /dev/disk/cloud/azure_resource
-       require_azure_protected_secrets_tool: false
        require_azure_cvm_secrets_provisioning: false
 
 

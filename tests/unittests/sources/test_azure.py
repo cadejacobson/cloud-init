@@ -3722,7 +3722,7 @@ class TestDetermineSecretsProvisioning:
         ) as m:
             yield m
 
-    def test_non_cvm_skips_tool(
+    def test_non_cvm_reports_failure(
         self,
         azure_ds,
         mock_is_cvm,
@@ -3731,7 +3731,8 @@ class TestDetermineSecretsProvisioning:
     ):
         mock_is_cvm.return_value = False
 
-        assert azure_ds._determine_secrets_provisioning() is False
+        with pytest.raises(errors.ReportableErrorNotACvm):
+            azure_ds._determine_secrets_provisioning()
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
@@ -3749,36 +3750,36 @@ class TestDetermineSecretsProvisioning:
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
-    @pytest.mark.parametrize("require_tool", [True, False])
-    def test_undetermined_cvm(self, azure_ds, mock_is_cvm, require_tool):
-        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = require_tool
+    def test_undetermined_cvm_reports_failure(self, azure_ds, mock_is_cvm):
         mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
 
-        if require_tool:
-            with pytest.raises(
-                errors.ReportableErrorRequiredSecretsToolNotFound
-            ):
-                azure_ds._determine_secrets_provisioning()
-        else:
-            assert azure_ds._determine_secrets_provisioning() is False
+        with pytest.raises(
+            errors.ReportableErrorRequiredSecretsToolNotFound
+        ) as exc_info:
+            azure_ds._determine_secrets_provisioning()
 
-    @pytest.mark.parametrize("require_tool", [True, False])
-    def test_cvm_tool_absent(
-        self, azure_ds, mock_is_cvm, mock_is_tool_present, require_tool
+        assert exc_info.value.supporting_data == {
+            "require_azure_cvm_secrets_provisioning": True,
+            "is_cvm": None,
+        }
+
+    def test_cvm_tool_absent_reports_failure(
+        self, azure_ds, mock_is_cvm, mock_is_tool_present
     ):
-        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = require_tool
         mock_is_cvm.return_value = True
         mock_is_tool_present.return_value = False
 
-        if require_tool:
-            with pytest.raises(
-                errors.ReportableErrorRequiredSecretsToolNotFound
-            ):
-                azure_ds._determine_secrets_provisioning()
-        else:
-            assert azure_ds._determine_secrets_provisioning() is False
+        with pytest.raises(
+            errors.ReportableErrorRequiredSecretsToolNotFound
+        ) as exc_info:
+            azure_ds._determine_secrets_provisioning()
 
-    def test_cvm_tool_present_not_enabled(
+        assert exc_info.value.supporting_data == {
+            "require_azure_cvm_secrets_provisioning": True,
+            "is_cvm": True,
+        }
+
+    def test_cvm_tool_present_not_enabled_reports_failure(
         self,
         azure_ds,
         mock_is_cvm,
@@ -3789,7 +3790,10 @@ class TestDetermineSecretsProvisioning:
         mock_is_tool_present.return_value = True
         mock_is_secrets_provisioning_enabled.return_value = False
 
-        assert azure_ds._determine_secrets_provisioning() is False
+        with pytest.raises(
+            errors.ReportableErrorSecretsProvisioningNotEnabled
+        ):
+            azure_ds._determine_secrets_provisioning()
 
     def test_cvm_tool_present_enabled(
         self,
@@ -3803,12 +3807,6 @@ class TestDetermineSecretsProvisioning:
         mock_is_secrets_provisioning_enabled.return_value = True
 
         assert azure_ds._determine_secrets_provisioning() is True
-
-    def test_default_require_flag_is_false(self, azure_ds):
-        assert (
-            azure_ds.ds_cfg.get("require_azure_protected_secrets_tool")
-            is False
-        )
 
 
 def test_default_require_azure_cvm_secrets_provisioning_is_false(azure_ds):
@@ -4055,7 +4053,6 @@ class TestProvisioning:
     def test_secrets_tool_required_but_undetermined_reports_failure(self):
         """A required-but-unusable secrets tool fails provisioning (E1)."""
         self.azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = True
-        self.azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
         with mock.patch.object(
             dsaz.cvm,
             "is_cvm",
@@ -4065,7 +4062,12 @@ class TestProvisioning:
 
         # E1 was reported to the host via KVP.
         assert self.mock_kvp_report_failure_to_host.mock_calls == [
-            mock.call(errors.ReportableErrorRequiredSecretsToolNotFound()),
+            mock.call(
+                errors.ReportableErrorRequiredSecretsToolNotFound(
+                    require_azure_cvm_secrets_provisioning=True,
+                    is_cvm=None,
+                )
+            ),
         ]
 
         # The VM was left unconfigured: OVF media was never read.

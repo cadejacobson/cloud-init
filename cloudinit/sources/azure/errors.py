@@ -235,8 +235,32 @@ class ReportableErrorProxyAgentStatusFailure(ReportableError):
 
 
 class ReportableErrorRequiredSecretsToolNotFound(ReportableError):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        require_azure_cvm_secrets_provisioning: bool,
+        is_cvm: Optional[bool],
+    ) -> None:
         super().__init__("required azure-protected-secrets-tool not found")
+
+        self.supporting_data["require_azure_cvm_secrets_provisioning"] = (
+            require_azure_cvm_secrets_provisioning
+        )
+        self.supporting_data["is_cvm"] = is_cvm
+
+
+class ReportableErrorNotACvm(ReportableError):
+    def __init__(self) -> None:
+        super().__init__(
+            "required CVM secrets provisioning but not a confidential VM"
+        )
+
+
+class ReportableErrorSecretsProvisioningNotEnabled(ReportableError):
+    def __init__(self) -> None:
+        super().__init__(
+            "required CVM secrets provisioning but it is not enabled"
+        )
 
 
 class ReportableErrorSecretsTool(ReportableError):
