@@ -293,7 +293,7 @@ BUILTIN_DS_CONFIG = {
     "require_azure_protected_secrets_tool": False,
     # Enable the CVM secrets-provisioning path (decrypt customData and
     # adminPassword via azure-protected-secrets-tool). Off by default.
-    "enforce_cvm_secrets_provisioning": False,
+    "require_azure_cvm_secrets_provisioning": False,
 }
 
 BUILTIN_CLOUD_EPHEMERAL_DISK_CONFIG = {
@@ -619,8 +619,8 @@ class DataSourceAzure(sources.DataSource):
     def _determine_secrets_provisioning(self) -> bool:
         """Gate the CVM secrets-provisioning path.
 
-        Gated first on the ``enforce_cvm_secrets_provisioning`` config flag;
-        when it is unset the path is skipped entirely. Otherwise runs
+        Gated first on the ``require_azure_cvm_secrets_provisioning`` config
+        flag; when it is unset the path is skipped entirely. Otherwise runs
         cloud-init's own CVM detection, then consults
         azure-protected-secrets-tool. Returns True when secrets provisioning
         is enabled (the v1 path) and False for normal provisioning.
@@ -632,7 +632,9 @@ class DataSourceAzure(sources.DataSource):
         :raises errors.ReportableErrorRequiredSecretsToolNotFound: when the
             tool is required but cannot be used.
         """
-        if not self.ds_cfg.get("enforce_cvm_secrets_provisioning", False):
+        if not self.ds_cfg.get(
+            "require_azure_cvm_secrets_provisioning", False
+        ):
             report_diagnostic_event(
                 "CVM secrets provisioning not enabled by configuration.",
                 logger_func=LOG.debug,

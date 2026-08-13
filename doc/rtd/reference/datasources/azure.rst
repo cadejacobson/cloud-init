@@ -62,7 +62,7 @@ The settings that may be configured are:
   case is fatal. When False, cloud-init falls back to best-effort normal
   provisioning. Has no effect on a definite non-CVM. Default is False.
 
-* :command:`enforce_cvm_secrets_provisioning`
+* :command:`require_azure_cvm_secrets_provisioning`
 
   Boolean that enables the Confidential VM (CVM) secrets-provisioning path,
   where ``customData`` and ``adminPassword`` are decrypted via
@@ -86,7 +86,7 @@ An example configuration with the default values is provided below:
        disk_aliases:
          ephemeral0: /dev/disk/cloud/azure_resource
        require_azure_protected_secrets_tool: false
-       enforce_cvm_secrets_provisioning: false
+       require_azure_cvm_secrets_provisioning: false
 
 
 User data

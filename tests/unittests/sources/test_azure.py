@@ -3698,7 +3698,7 @@ class TestInstanceId:
 class TestDetermineSecretsProvisioning:
     @pytest.fixture(autouse=True)
     def enable_secrets_provisioning(self, azure_ds):
-        azure_ds.ds_cfg["enforce_cvm_secrets_provisioning"] = True
+        azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = True
 
     @pytest.fixture
     def mock_is_cvm(self):
@@ -3742,7 +3742,7 @@ class TestDetermineSecretsProvisioning:
         mock_is_tool_present,
         mock_is_secrets_provisioning_enabled,
     ):
-        azure_ds.ds_cfg["enforce_cvm_secrets_provisioning"] = False
+        azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = False
 
         assert azure_ds._determine_secrets_provisioning() is False
         assert mock_is_cvm.mock_calls == []
@@ -3811,8 +3811,10 @@ class TestDetermineSecretsProvisioning:
         )
 
 
-def test_default_enforce_cvm_secrets_provisioning_is_false(azure_ds):
-    assert azure_ds.ds_cfg.get("enforce_cvm_secrets_provisioning") is False
+def test_default_require_azure_cvm_secrets_provisioning_is_false(azure_ds):
+    assert (
+        azure_ds.ds_cfg.get("require_azure_cvm_secrets_provisioning") is False
+    )
 
 
 class TestSecretDecryption:
@@ -4052,7 +4054,7 @@ class TestProvisioning:
 
     def test_secrets_tool_required_but_undetermined_reports_failure(self):
         """A required-but-unusable secrets tool fails provisioning (E1)."""
-        self.azure_ds.ds_cfg["enforce_cvm_secrets_provisioning"] = True
+        self.azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = True
         self.azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
         with mock.patch.object(
             dsaz.cvm,
