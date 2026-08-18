@@ -56,10 +56,19 @@ The settings that may be configured are:
 
 * :command:`require_azure_cvm_secrets_provisioning`
 
-  Boolean that enables the Confidential VM (CVM) secrets-provisioning path,
-  where ``customData`` and ``adminPassword`` are decrypted via
-  ``azure-protected-secrets-tool``. When False, the path is skipped entirely
-  and secrets are read as-is. Default is False.
+  Boolean that requires Confidential VM (CVM) secrets provisioning. A
+  confirmed CVM enters the path whenever ``azure-protected-secrets-tool`` is
+  installed and reports secrets provisioning enabled, regardless of this
+  setting. When True, a definite non-CVM, a confirmed CVM with a missing tool,
+  or disabled secrets provisioning is fatal. Default is False.
+
+* :command:`require_azure_protected_secrets_tool`
+
+  Boolean that controls whether undetermined CVM isolation, or a confirmed
+  CVM with a missing ``azure-protected-secrets-tool``, reports a fatal error.
+  When False, undetermined isolation falls back to normal provisioning. A
+  confirmed CVM with a missing tool still fails when CVM secrets provisioning
+  is required. Default is False.
 
 Configuration for the datasource can also be read from a ``dscfg`` entry in
 the ``LinuxProvisioningConfigurationSet``. Content in ``dscfg`` node is
@@ -78,6 +87,7 @@ An example configuration with the default values is provided below:
        disk_aliases:
          ephemeral0: /dev/disk/cloud/azure_resource
        require_azure_cvm_secrets_provisioning: false
+       require_azure_protected_secrets_tool: false
 
 
 User data

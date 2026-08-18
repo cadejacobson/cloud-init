@@ -288,9 +288,10 @@ BUILTIN_DS_CONFIG = {
     "disk_aliases": {"ephemeral0": RESOURCE_DISK_PATH},
     "apply_network_config": True,  # Use IMDS published network configuration
     "apply_network_config_for_secondary_ips": True,  # Configure secondary ips
-    # Enable the CVM secrets-provisioning path (decrypt customData and
-    # adminPassword via azure-protected-secrets-tool). Off by default.
+    # Detect and use CVM secrets provisioning when available. These flags make
+    # otherwise-fallback outcomes fatal; they do not gate entry into the path.
     "require_azure_cvm_secrets_provisioning": False,
+    "require_azure_protected_secrets_tool": False,
 }
 
 BUILTIN_CLOUD_EPHEMERAL_DISK_CONFIG = {
@@ -616,14 +617,17 @@ class DataSourceAzure(sources.DataSource):
     def _determine_secrets_provisioning(self) -> bool:
         """Gate the CVM secrets-provisioning path.
 
-        Skipped entirely when ``require_azure_cvm_secrets_provisioning`` is
-        unset. When set, the CVM secrets-provisioning path is required: the VM
-        must be a confidential VM with azure-protected-secrets-tool installed
-        and secrets provisioning enabled. Any unmet condition reports failure
-        rather than falling back to normal provisioning.
+        A confirmed CVM enters the path when azure-protected-secrets-tool is
+        installed and reports secrets provisioning enabled, independently of
+        the requirement flags. ``require_azure_cvm_secrets_provisioning``
+        makes a definite non-CVM, a confirmed CVM with a missing tool, or
+        disabled provisioning fatal. ``require_azure_protected_secrets_tool``
+        makes undetermined CVM isolation or a confirmed CVM with a missing
+        tool fatal. Other outcomes fall back to normal provisioning.
 
-        :raises errors.ReportableErrorRequiredSecretsToolNotFound: when CVM
-            isolation cannot be determined or the tool is not installed.
+        :raises errors.ReportableErrorRequiredSecretsToolNotFound: when the
+            required tool is not installed, or CVM isolation cannot be
+            determined and the tool is required.
         :raises errors.ReportableErrorNotACvm: when the VM is not a CVM.
         :raises errors.ReportableErrorSecretsProvisioningNotEnabled: when the
             tool reports secrets provisioning is not enabled.
@@ -631,50 +635,70 @@ class DataSourceAzure(sources.DataSource):
         require_cvm_secrets = self.ds_cfg.get(
             "require_azure_cvm_secrets_provisioning", False
         )
-        if not require_cvm_secrets:
-            report_diagnostic_event(
-                "CVM secrets provisioning not required by configuration.",
-                logger_func=LOG.debug,
-            )
-            return False
+        require_secrets_tool = self.ds_cfg.get(
+            "require_azure_protected_secrets_tool", False
+        )
 
         try:
             detected_cvm = cvm.is_cvm()
         except cvm.CvmDetectionError as error:
             # Native detection failed and the tool could not decide either.
-            report_diagnostic_event(
-                "Unable to determine CVM isolation: %s" % error,
-                logger_func=LOG.error,
-            )
-            raise errors.ReportableErrorRequiredSecretsToolNotFound(
-                require_azure_cvm_secrets_provisioning=require_cvm_secrets,
-                is_cvm=None,
-            )
+            if require_secrets_tool:
+                report_diagnostic_event(
+                    "Unable to determine CVM isolation: %s" % error,
+                    logger_func=LOG.error,
+                )
+                raise errors.ReportableErrorRequiredSecretsToolNotFound(
+                    require_azure_cvm_secrets_provisioning=require_cvm_secrets,
+                    is_cvm=None,
+                )
+            return False
 
         if not detected_cvm:
+            if require_cvm_secrets:
+                report_diagnostic_event(
+                    "Required CVM secrets provisioning but VM is not a CVM.",
+                    logger_func=LOG.error,
+                )
+                raise errors.ReportableErrorNotACvm()
+
             report_diagnostic_event(
-                "Required CVM secrets provisioning but VM is not a CVM.",
-                logger_func=LOG.error,
+                "VM is not a CVM: skipping secrets provisioning",
+                logger_func=LOG.debug,
             )
-            raise errors.ReportableErrorNotACvm()
+            return False
 
         if not cvm.is_tool_present():
+            if require_cvm_secrets or require_secrets_tool:
+                report_diagnostic_event(
+                    "Required azure-protected-secrets-tool is not installed.",
+                    logger_func=LOG.error,
+                )
+                raise errors.ReportableErrorRequiredSecretsToolNotFound(
+                    require_azure_cvm_secrets_provisioning=require_cvm_secrets,
+                    is_cvm=True,
+                )
+
             report_diagnostic_event(
-                "Required CVM secrets provisioning but "
-                "azure-protected-secrets-tool is not installed.",
-                logger_func=LOG.error,
+                "azure-protected-secrets-tool is not installed: "
+                "skipping secrets provisioning",
+                logger_func=LOG.debug,
             )
-            raise errors.ReportableErrorRequiredSecretsToolNotFound(
-                require_azure_cvm_secrets_provisioning=require_cvm_secrets,
-                is_cvm=True,
-            )
+            return False
 
         if not cvm.is_secrets_provisioning_enabled():
+            if require_cvm_secrets:
+                report_diagnostic_event(
+                    "Required CVM secrets provisioning but it is not enabled.",
+                    logger_func=LOG.error,
+                )
+                raise errors.ReportableErrorSecretsProvisioningNotEnabled()
+
             report_diagnostic_event(
-                "Required CVM secrets provisioning but it is not enabled.",
-                logger_func=LOG.error,
+                "CVM secrets provisioning not required by configuration.",
+                logger_func=LOG.debug,
             )
-            raise errors.ReportableErrorSecretsProvisioningNotEnabled()
+            return False
 
         report_diagnostic_event(
             "Secrets provisioning enabled (v1).",
@@ -704,9 +728,8 @@ class DataSourceAzure(sources.DataSource):
         @raise: InvalidMetaDataException when the expected metadata service is
             unavailable, broken or disabled.
         """
-        # CVM secrets provisioning gate. Runs first so a definite non-CVM
-        # skips it entirely. Fatal (E1) only when the tool is required but
-        # unusable.
+        # Determine the secrets path before reading OVF so encrypted fields
+        # are decrypted only when the CVM and tool checks enable v1.
         self._secrets_provisioning_enabled = (
             self._determine_secrets_provisioning()
         )

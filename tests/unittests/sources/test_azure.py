@@ -3736,7 +3736,7 @@ class TestDetermineSecretsProvisioning:
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
-    def test_disabled_by_config_skips_detection(
+    def test_disabled_by_config_falls_back_when_not_a_cvm(
         self,
         azure_ds,
         mock_is_cvm,
@@ -3744,13 +3744,14 @@ class TestDetermineSecretsProvisioning:
         mock_is_secrets_provisioning_enabled,
     ):
         azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = False
+        mock_is_cvm.return_value = False
 
         assert azure_ds._determine_secrets_provisioning() is False
-        assert mock_is_cvm.mock_calls == []
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
     def test_undetermined_cvm_reports_failure(self, azure_ds, mock_is_cvm):
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
         mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
 
         with pytest.raises(
@@ -3762,6 +3763,13 @@ class TestDetermineSecretsProvisioning:
             "require_azure_cvm_secrets_provisioning": True,
             "is_cvm": None,
         }
+
+    def test_undetermined_cvm_skips_failure_by_default(
+        self, azure_ds, mock_is_cvm
+    ):
+        mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
+
+        assert azure_ds._determine_secrets_provisioning() is False
 
     def test_cvm_tool_absent_reports_failure(
         self, azure_ds, mock_is_cvm, mock_is_tool_present
@@ -3778,6 +3786,21 @@ class TestDetermineSecretsProvisioning:
             "require_azure_cvm_secrets_provisioning": True,
             "is_cvm": True,
         }
+
+    def test_cvm_tool_absent_falls_back_by_default(
+        self,
+        azure_ds,
+        mock_is_cvm,
+        mock_is_tool_present,
+        mock_is_secrets_provisioning_enabled,
+    ):
+        azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = False
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = False
+        mock_is_cvm.return_value = True
+        mock_is_tool_present.return_value = False
+
+        assert azure_ds._determine_secrets_provisioning() is False
+        assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
     def test_cvm_tool_present_not_enabled_reports_failure(
         self,
@@ -3813,6 +3836,10 @@ def test_default_require_azure_cvm_secrets_provisioning_is_false(azure_ds):
     assert (
         azure_ds.ds_cfg.get("require_azure_cvm_secrets_provisioning") is False
     )
+
+
+def test_default_require_azure_protected_secrets_tool_is_false(azure_ds):
+    assert azure_ds.ds_cfg.get("require_azure_protected_secrets_tool") is False
 
 
 class TestSecretDecryption:
@@ -4053,6 +4080,7 @@ class TestProvisioning:
     def test_secrets_tool_required_but_undetermined_reports_failure(self):
         """A required-but-unusable secrets tool fails provisioning (E1)."""
         self.azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = True
+        self.azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
         with mock.patch.object(
             dsaz.cvm,
             "is_cvm",
