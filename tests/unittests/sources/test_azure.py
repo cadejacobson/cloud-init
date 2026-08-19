@@ -3750,8 +3750,27 @@ class TestDetermineSecretsProvisioning:
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 
-    def test_undetermined_cvm_reports_failure(self, azure_ds, mock_is_cvm):
+    def test_undetermined_cvm_reports_failure_when_tool_required(
+        self, azure_ds, mock_is_cvm
+    ):
+        azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = False
         azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
+        mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
+
+        with pytest.raises(
+            errors.ReportableErrorRequiredSecretsToolNotFound
+        ) as exc_info:
+            azure_ds._determine_secrets_provisioning()
+
+        assert exc_info.value.supporting_data == {
+            "require_azure_cvm_secrets_provisioning": False,
+            "is_cvm": None,
+        }
+
+    def test_undetermined_cvm_reports_failure_when_cvm_secrets_required(
+        self, azure_ds, mock_is_cvm
+    ):
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = False
         mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
 
         with pytest.raises(
@@ -3764,9 +3783,11 @@ class TestDetermineSecretsProvisioning:
             "is_cvm": None,
         }
 
-    def test_undetermined_cvm_skips_failure_by_default(
+    def test_undetermined_cvm_falls_back_by_default(
         self, azure_ds, mock_is_cvm
     ):
+        azure_ds.ds_cfg["require_azure_cvm_secrets_provisioning"] = False
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = False
         mock_is_cvm.side_effect = dsaz.cvm.CvmDetectionError("undetermined")
 
         assert azure_ds._determine_secrets_provisioning() is False

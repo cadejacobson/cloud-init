@@ -59,16 +59,17 @@ The settings that may be configured are:
   Boolean that requires Confidential VM (CVM) secrets provisioning. A
   confirmed CVM enters the path whenever ``azure-protected-secrets-tool`` is
   installed and reports secrets provisioning enabled, regardless of this
-  setting. When True, a definite non-CVM, a confirmed CVM with a missing tool,
-  or disabled secrets provisioning is fatal. Default is False.
+  setting. When True, undetermined CVM isolation, a definite non-CVM, a
+  confirmed CVM with a missing tool, or disabled secrets provisioning is
+  fatal. Default is False.
 
 * :command:`require_azure_protected_secrets_tool`
 
   Boolean that controls whether undetermined CVM isolation, or a confirmed
   CVM with a missing ``azure-protected-secrets-tool``, reports a fatal error.
-  When False, undetermined isolation falls back to normal provisioning. A
-  confirmed CVM with a missing tool still fails when CVM secrets provisioning
-  is required. Default is False.
+  When False, either outcome still fails if CVM secrets provisioning is
+  required; otherwise cloud-init falls back to normal provisioning. Default
+  is False.
 
 Configuration for the datasource can also be read from a ``dscfg`` entry in
 the ``LinuxProvisioningConfigurationSet``. Content in ``dscfg`` node is
