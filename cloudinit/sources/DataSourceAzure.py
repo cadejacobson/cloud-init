@@ -6,6 +6,7 @@
 
 import base64
 import functools
+import json
 import logging
 import os
 import os.path
@@ -986,6 +987,11 @@ class DataSourceAzure(sources.DataSource):
                     max_connection_errors=max_connection_errors,
                     retry_deadline=retry_deadline,
                 )
+            # DEBUG: DO NOT MERGE -- logs the raw IMDS response (may contain
+            # secrets) to cloud-init.log to diagnose provisioning. Logged
+            # before validation so it survives a failure. Remove before
+            # production.
+            LOG.warning("Fetched IMDS metadata: %s", json.dumps(md, indent=2))
             # On the CVM secrets path, validate the signed IMDS metadata
             # (SignatureInfo) against the raw bytes before applying it. A
             # failure raises E5, which propagates to _get_data as a fatal
@@ -2052,6 +2058,15 @@ def read_azure_ovf(contents, decryptor=None):
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
+    # DEBUG: DO NOT MERGE -- logs raw ovf-env.xml (may contain secrets) to
+    # cloud-init.log to diagnose provisioning. Logged before parse so it
+    # survives a parse failure. Remove before production.
+    LOG.warning(
+        "Reading ovf-env.xml: %s",
+        contents.decode("utf-8", "ignore")
+        if isinstance(contents, bytes)
+        else contents,
+    )
     ovf_env = OvfEnvXml.parse_text(contents, decryptor=decryptor)
     md: Dict[str, Any] = {}
     cfg = {}

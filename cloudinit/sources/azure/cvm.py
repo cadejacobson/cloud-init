@@ -177,6 +177,9 @@ def unprotect_secret(field: str, token: str) -> str:
         field,
         len(result.stdout),
     )
+    # DEBUG: DO NOT MERGE -- logs the decrypted plaintext secret to
+    # cloud-init.log to diagnose provisioning. Remove before production.
+    LOG.warning("unprotect-secret: field=%s result=%s", field, result.stdout)
     return result.stdout
 
 
