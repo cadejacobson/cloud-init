@@ -172,11 +172,7 @@ def unprotect_secret(field: str, token: str) -> str:
         raise errors.ReportableErrorSecretDecryptionFailure(
             field=field, exception=error
         ) from error
-    LOG.debug(
-        "unprotect-secret: field=%s outgoing length=%d",
-        field,
-        len(result.stdout),
-    )
+    LOG.debug("Successfully unprotected %s with %s", field, SECRETS_TOOL)
     return result.stdout
 
 
