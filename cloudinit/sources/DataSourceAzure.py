@@ -981,6 +981,7 @@ class DataSourceAzure(sources.DataSource):
                 md_raw, md = imds.fetch_metadata_and_raw_with_api_fallback(
                     max_connection_errors=max_connection_errors,
                     retry_deadline=retry_deadline,
+                    fallback_on_400=False,
                 )
             else:
                 md_raw = None
@@ -996,6 +997,10 @@ class DataSourceAzure(sources.DataSource):
                 cvm.validate_imds_metadata(md_raw)
             return md
         except UrlError as error:
+            if self._secrets_provisioning_enabled and error.code == 400:
+                raise errors.ReportableErrorUnsupportedImdsApiVersion(
+                    api_version=imds.IMDS_API_VERSION
+                ) from error
             error_string = str(error)
             duration = monotonic() - start_time
             error_report = errors.ReportableErrorImdsUrlError(

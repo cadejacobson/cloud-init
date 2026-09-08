@@ -170,6 +170,11 @@ class ReportableErrorImdsMetadataParsingException(ReportableError):
         self.supporting_data["exception"] = repr(exception)
 
 
+class ReportableErrorUnsupportedImdsApiVersion(ReportableError):
+    def __init__(self, *, api_version: str) -> None:
+        super().__init__(f"unsupported IMDS API version={api_version}")
+
+
 class ReportableErrorOsDiskPpsFailure(ReportableError):
     def __init__(self) -> None:
         super().__init__("error waiting for host shutdown")

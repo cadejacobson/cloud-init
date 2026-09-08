@@ -16,6 +16,7 @@ from cloudinit.url_helper import UrlError, readurl
 LOG = logging.getLogger(__name__)
 
 IMDS_URL = "http://169.254.169.254/metadata"
+IMDS_API_VERSION = "2026-06-23"
 
 
 def headers_cb(_url):
@@ -183,7 +184,9 @@ def _fetch_metadata(
 
 
 def fetch_metadata_and_raw_with_api_fallback(
-    retry_deadline: float, max_connection_errors: Optional[int] = None
+    retry_deadline: float,
+    max_connection_errors: Optional[int] = None,
+    fallback_on_400: bool = True,
 ) -> Tuple[bytes, Dict]:
     """Fetch extended metadata, returning the raw response and parsed dict.
 
@@ -192,6 +195,7 @@ def fetch_metadata_and_raw_with_api_fallback(
     without re-serializing (which could drift from the signed bytes).
 
     :param retry_deadline: time()-based deadline to retry until.
+    :param fallback_on_400: whether to retry with the legacy API version.
 
     :raises UrlError: on error fetching metadata.
     :raises ValueError: on error parsing metadata.
@@ -201,10 +205,13 @@ def fetch_metadata_and_raw_with_api_fallback(
         retry_deadline=retry_deadline,
     )
     try:
-        url = IMDS_URL + "/instance?api-version=2026-06-23&extended=true"
+        url = (
+            IMDS_URL
+            + f"/instance?api-version={IMDS_API_VERSION}&extended=true"
+        )
         return _fetch_metadata(url, retry_handler=retry_handler)
     except UrlError as error:
-        if error.code == 400:
+        if error.code == 400 and fallback_on_400:
             report_diagnostic_event(
                 "Falling back to IMDS api-version: 2021-08-01",
                 logger_func=LOG.warning,

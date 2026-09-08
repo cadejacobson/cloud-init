@@ -5398,6 +5398,37 @@ class TestCheckAzureProxyAgent:
 
 
 class TestGetMetadataFromImds:
+    def test_secrets_path_http_400_raises_unsupported_api_version(
+        self, azure_ds, mock_monotonic
+    ):
+        azure_ds._secrets_provisioning_enabled = True
+        mock_monotonic.return_value = 0.0
+        url = (
+            "http://169.254.169.254/metadata/instance?"
+            f"api-version={imds.IMDS_API_VERSION}&extended=true"
+        )
+        exception = url_helper.UrlError(
+            "unsupported API version", code=400, url=url
+        )
+        error_type = errors.ReportableErrorUnsupportedImdsApiVersion
+
+        with mock.patch.object(
+            errors,
+            "ReportableErrorUnsupportedImdsApiVersion",
+            wraps=error_type,
+        ) as m_error, mock.patch.object(
+            imds, "_fetch_metadata", autospec=True, side_effect=exception
+        ) as m_fetch, pytest.raises(
+            error_type
+        ) as exc_info:
+            azure_ds.get_metadata_from_imds(report_failure=True)
+
+        assert exc_info.value.reason == (
+            f"unsupported IMDS API version={imds.IMDS_API_VERSION}"
+        )
+        m_error.assert_called_once_with(api_version=imds.IMDS_API_VERSION)
+        assert m_fetch.mock_calls == [mock.call(url, retry_handler=mock.ANY)]
+
     @pytest.mark.parametrize("route_configured_for_imds", [False, True])
     @pytest.mark.parametrize("report_failure", [False, True])
     @pytest.mark.parametrize(
