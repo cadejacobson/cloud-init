@@ -3764,6 +3764,7 @@ class TestDetermineSecretsProvisioning:
 
         assert exc_info.value.supporting_data == {
             "require_azure_cvm_secrets_provisioning": False,
+            "require_azure_protected_secrets_tool": True,
             "is_cvm": None,
         }
 
@@ -3780,6 +3781,7 @@ class TestDetermineSecretsProvisioning:
 
         assert exc_info.value.supporting_data == {
             "require_azure_cvm_secrets_provisioning": True,
+            "require_azure_protected_secrets_tool": False,
             "is_cvm": None,
         }
 
@@ -3805,6 +3807,7 @@ class TestDetermineSecretsProvisioning:
 
         assert exc_info.value.supporting_data == {
             "require_azure_cvm_secrets_provisioning": True,
+            "require_azure_protected_secrets_tool": False,
             "is_cvm": True,
         }
 
@@ -4114,6 +4117,7 @@ class TestProvisioning:
             mock.call(
                 errors.ReportableErrorRequiredSecretsToolNotFound(
                     require_azure_cvm_secrets_provisioning=True,
+                    require_azure_protected_secrets_tool=True,
                     is_cvm=None,
                 )
             ),

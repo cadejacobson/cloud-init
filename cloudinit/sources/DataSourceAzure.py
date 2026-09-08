@@ -651,6 +651,7 @@ class DataSourceAzure(sources.DataSource):
                 )
                 raise errors.ReportableErrorRequiredSecretsToolNotFound(
                     require_azure_cvm_secrets_provisioning=require_cvm_secrets,
+                    require_azure_protected_secrets_tool=require_secrets_tool,
                     is_cvm=None,
                 )
             return False
@@ -677,6 +678,7 @@ class DataSourceAzure(sources.DataSource):
                 )
                 raise errors.ReportableErrorRequiredSecretsToolNotFound(
                     require_azure_cvm_secrets_provisioning=require_cvm_secrets,
+                    require_azure_protected_secrets_tool=require_secrets_tool,
                     is_cvm=True,
                 )
 

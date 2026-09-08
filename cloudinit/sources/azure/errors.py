@@ -239,12 +239,16 @@ class ReportableErrorRequiredSecretsToolNotFound(ReportableError):
         self,
         *,
         require_azure_cvm_secrets_provisioning: bool,
+        require_azure_protected_secrets_tool: bool,
         is_cvm: Optional[bool],
     ) -> None:
         super().__init__("required azure-protected-secrets-tool not found")
 
         self.supporting_data["require_azure_cvm_secrets_provisioning"] = (
             require_azure_cvm_secrets_provisioning
+        )
+        self.supporting_data["require_azure_protected_secrets_tool"] = (
+            require_azure_protected_secrets_tool
         )
         self.supporting_data["is_cvm"] = is_cvm
 
