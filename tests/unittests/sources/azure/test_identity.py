@@ -162,7 +162,7 @@ class TestChassisAssetTag:
                 "cloudinit.sources.azure.identity",
                 10,
                 "Azure chassis asset tag: "
-                "'4860-8370-5222-2345-9626-0897-77' (AZURE_STACK)",
+                "'6590-8582-6932-7679-6765-7632-8677' (AZURE_STACK)",
             )
         ]
 

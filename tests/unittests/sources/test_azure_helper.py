@@ -1533,6 +1533,25 @@ class TestOvfEnvXml:
     def test_valid_ovf_scenarios(self, ovf, expected):
         assert azure_helper.OvfEnvXml.parse_text(ovf) == expected
 
+    def test_missing_azure_stack_section_is_not_logged(self, caplog):
+        parsed = azure_helper.OvfEnvXml.parse_text(construct_ovf_env())
+
+        assert parsed.disable_imds is False
+        assert parsed.disable_wireserver is False
+        assert (
+            "missing configuration for 'AzureStackConfigurationSection'"
+            not in caplog.text
+        )
+
+    def test_missing_azure_stack_properties_use_defaults(self):
+        parsed = azure_helper.OvfEnvXml.parse_text(
+            construct_ovf_env(disable_imds=True)
+        )
+
+        assert parsed.disable_imds is True
+        assert parsed.disable_wireserver is False
+        assert parsed.network is None
+
     @pytest.mark.parametrize(
         "ovf,error",
         [

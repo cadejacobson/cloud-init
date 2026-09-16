@@ -713,12 +713,28 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
-        # Azure Stack may opt out of IMDS and/or Wireserver via ovf-env.xml.
-        self._disable_imds = bool(cfg.get("DisableIMDS"))
-        self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+        if self._is_azure_stack:
+            # Azure Stack may opt out of IMDS and/or Wireserver via
+            # ovf-env.xml and may provide a native v2 network config.
+            self._disable_imds = bool(cfg.get("DisableIMDS"))
+            self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+            self._ovf_network_config = cfg.get("Network")
 
-        # Azure Stack may provide a native v2 network config in ovf-env.xml.
-        self._ovf_network_config = cfg.get("Network")
+            if self._disable_imds:
+                report_diagnostic_event(
+                    "DisableIMDS: True",
+                    logger_func=LOG.info,
+                )
+            if self._disable_wireserver:
+                report_diagnostic_event(
+                    "DisableWireserver: True",
+                    logger_func=LOG.info,
+                )
+            if self._ovf_network_config is not None:
+                report_diagnostic_event(
+                    "Network config provided in ovf-env.xml.",
+                    logger_func=LOG.info,
+                )
 
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does

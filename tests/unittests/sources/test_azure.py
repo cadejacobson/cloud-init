@@ -1571,6 +1571,8 @@ scbus-1 on xpt0 bus 0
         }
         dsrc = get_ds(data)
         expected_cfg = {
+            "DisableIMDS": False,
+            "DisableWireserver": False,
             "PreprovisionedVMType": None,
             "PreprovisionedVm": False,
             "ProvisionGuestProxyAgent": False,
@@ -1798,6 +1800,8 @@ scbus-1 on xpt0 bus 0
         assert ret
 
         assert dsrc.cfg == {
+            "DisableIMDS": False,
+            "DisableWireserver": False,
             "PreprovisionedVMType": None,
             "PreprovisionedVm": False,
             "ProvisionGuestProxyAgent": False,
@@ -2494,6 +2498,22 @@ scbus-1 on xpt0 bus 0
 class TestLoadAzureDsDir:
     """Tests for load_azure_ds_dir."""
 
+    def test_loads_azure_stack_configuration_when_enabled(self, tmp_path):
+        ovf_path = tmp_path / "ovf-env.xml"
+        ovf_path.write_text(
+            construct_ovf_env(
+                disable_imds=True,
+                disable_wireserver=True,
+                network={"version": 2, "ethernets": {}},
+            )
+        )
+
+        _md, _ud, cfg, _files = dsaz.load_azure_ds_dir(str(tmp_path))
+
+        assert cfg["DisableIMDS"] is True
+        assert cfg["DisableWireserver"] is True
+        assert cfg["Network"] == {"version": 2, "ethernets": {}}
+
     def test_missing_ovf_env_xml_raises_non_azure_datasource_error(
         self, tmp_path
     ):
@@ -3080,6 +3100,35 @@ class TestPreprovisioningReadAzureOvfFlag:
         ret = dsaz.read_azure_ovf(content)
         cfg = ret[2]
         assert cfg["DisableWireserver"] is False
+
+    def test_read_azure_ovf_does_not_log_missing_stack_config(self, caplog):
+        _md, _ud, cfg = dsaz.read_azure_ovf(construct_ovf_env())
+
+        assert cfg["DisableIMDS"] is False
+        assert cfg["DisableWireserver"] is False
+        assert "Network" not in cfg
+        assert "missing configuration for 'DisableIMDS'" not in caplog.text
+        assert (
+            "missing configuration for 'DisableWireserver'" not in caplog.text
+        )
+        assert "missing configuration for 'Network'" not in caplog.text
+        assert "DisableIMDS: " not in caplog.text
+        assert "DisableWireserver: " not in caplog.text
+        assert "Network config provided in ovf-env.xml." not in caplog.text
+
+    def test_reprovision_reads_stack_config_for_azure_stack(
+        self, azure_ds, mocker
+    ):
+        azure_ds._is_azure_stack = True
+        mocker.patch.object(
+            azure_ds,
+            "_poll_imds",
+            return_value=construct_ovf_env(disable_imds=True),
+        )
+
+        _md, _ud, cfg, _files = azure_ds._reprovision()
+
+        assert cfg["DisableIMDS"] is True
 
 
 @pytest.mark.parametrize(
@@ -4175,6 +4224,16 @@ class TestProvisioning:
             },
         }
 
+    def _set_chassis_asset_tag(self, asset_tag):
+        def fake_read(key):
+            if key == "chassis-asset-tag":
+                return asset_tag.value
+            if key == "system-uuid":
+                return "50109936-ef07-47fe-ac82-890c853f60d5"
+            raise RuntimeError()
+
+        self.mock_dmi_read_dmi_data.side_effect = fake_read
+
     def test_no_pps(self):
         ovf = construct_ovf_env(provision_guest_proxy_agent=False)
         md, ud, cfg = dsaz.read_azure_ovf(ovf)
@@ -4252,12 +4311,14 @@ class TestProvisioning:
         # Verify dmesg reported via KVP.
         assert len(self.mock_report_dmesg_to_kvp.mock_calls) == 1
 
-    def test_disable_imds_skips_query_and_shortens_dhcp_timeout(self):
+    def test_disable_imds_skips_query_and_shortens_dhcp_timeout(self, caplog):
         """DisableIMDS skips the IMDS query and the extended DHCP timeout."""
+        self._set_chassis_asset_tag(identity.ChassisAssetTag.AZURE_STACK)
         ovf = construct_ovf_env(disable_imds=True)
         md, ud, cfg = dsaz.read_azure_ovf(ovf)
         self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
         self.mock_azure_get_metadata_from_fabric.return_value = []
+        caplog.clear()
 
         self.azure_ds._check_and_get_data()
 
@@ -4279,12 +4340,19 @@ class TestProvisioning:
                 pubkey_info=None,
             )
         ]
+        assert "DisableIMDS: True" in caplog.text
 
-    def test_disable_imds_and_wireserver_skips_dhcp(self):
+    def test_disable_imds_and_wireserver_skips_dhcp(self, caplog):
         """With IMDS and Wireserver disabled, skip DHCP entirely."""
-        ovf = construct_ovf_env(disable_imds=True, disable_wireserver=True)
+        self._set_chassis_asset_tag(identity.ChassisAssetTag.AZURE_STACK)
+        ovf = construct_ovf_env(
+            disable_imds=True,
+            disable_wireserver=True,
+            network={"version": 2, "ethernets": {}},
+        )
         md, ud, cfg = dsaz.read_azure_ovf(ovf)
         self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+        caplog.clear()
 
         self.azure_ds._check_and_get_data()
 
@@ -4298,6 +4366,36 @@ class TestProvisioning:
 
         # No report ready to Wireserver.
         assert self.mock_azure_get_metadata_from_fabric.mock_calls == []
+        assert "DisableIMDS: True" in caplog.text
+        assert "DisableWireserver: True" in caplog.text
+        assert "Network config provided in ovf-env.xml." in caplog.text
+
+    def test_azure_cloud_ignores_azure_stack_configuration(self, caplog):
+        ovf = construct_ovf_env(
+            disable_imds=True,
+            disable_wireserver=True,
+            network={"version": 2, "ethernets": {}},
+        )
+        md, ud, cfg = dsaz.read_azure_ovf(ovf)
+        self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+        self.mock_readurl.return_value = mock.MagicMock(
+            contents=json.dumps(self.imds_md).encode()
+        )
+        self.mock_azure_get_metadata_from_fabric.return_value = []
+
+        self.azure_ds._check_and_get_data()
+
+        assert self.azure_ds._disable_imds is False
+        assert self.azure_ds._disable_wireserver is False
+        assert self.azure_ds._ovf_network_config is None
+        assert self.mock_wrapping_setup_ephemeral_networking.mock_calls == [
+            mock.call(timeout_minutes=20)
+        ]
+        assert self.mock_readurl.call_count == 1
+        assert self.mock_azure_get_metadata_from_fabric.call_count == 1
+        assert "DisableIMDS: True" not in caplog.text
+        assert "DisableWireserver: True" not in caplog.text
+        assert "Network config provided in ovf-env.xml." not in caplog.text
 
     def test_no_pps_gpa(self):
         """test full provisioning scope when azure-proxy-agent

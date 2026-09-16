@@ -1643,7 +1643,7 @@ VALID_CFG = {
     },
     "Azure-stack-dmi-detection": {
         "ds": "Azure",
-        "files": {P_CHASSIS_ASSET_TAG: "4860-8370-5222-2345-9626-0897-77\n"},
+        "files": {P_CHASSIS_ASSET_TAG: "6590-8582-6932-7679-6765-7632-8677\n"},
     },
     "Azure-seed-detection": {
         "ds": "Azure",

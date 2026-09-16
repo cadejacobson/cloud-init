@@ -1182,11 +1182,17 @@ class OvfEnvXml:
 
     def _parse_azure_stack_configuration_section(self, root):
         """Parse the optional Azure Stack configuration section."""
+        if (
+            root.find(
+                "./wa:AzureStackConfigurationSection", OvfEnvXml.NAMESPACES
+            )
+            is None
+        ):
+            return
+
         section = self._find(
             root, "AzureStackConfigurationSection", required=False
         )
-        if section is None:
-            return
 
         self.disable_imds = self._parse_property(
             section,
