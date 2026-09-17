@@ -342,7 +342,6 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
-        self._is_azure_stack = False
         self._disable_imds = False
         self._disable_wireserver = False
         self._system_uuid = None
@@ -360,7 +359,6 @@ class DataSourceAzure(sources.DataSource):
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
-        self._is_azure_stack = False
         self._disable_imds = False
         self._disable_wireserver = False
         self._system_uuid = None
@@ -713,7 +711,8 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
-        if self._is_azure_stack:
+        chassis_tag = identity.ChassisAssetTag.query_system()
+        if chassis_tag is identity.ChassisAssetTag.AZURE_STACK:
             # Azure Stack may opt out of IMDS and/or Wireserver via
             # ovf-env.xml and may provide a native v2 network config.
             self._disable_imds = bool(cfg.get("DisableIMDS"))
@@ -966,9 +965,6 @@ class DataSourceAzure(sources.DataSource):
         """
         chassis_tag = identity.ChassisAssetTag.query_system()
         if chassis_tag is not None:
-            self._is_azure_stack = (
-                chassis_tag is identity.ChassisAssetTag.AZURE_STACK
-            )
             return True
 
         # If no valid chassis tag, check for seeded ovf-env.xml.

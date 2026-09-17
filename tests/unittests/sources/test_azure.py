@@ -3546,19 +3546,18 @@ class TestRemoveUbuntuNetworkConfigScripts:
 
 class TestIsPlatformViable:
     @pytest.mark.parametrize(
-        "tag,expected_is_azure_stack",
+        "tag",
         [
-            (identity.ChassisAssetTag.AZURE_CLOUD, False),
-            (identity.ChassisAssetTag.AZURE_STACK, True),
+            identity.ChassisAssetTag.AZURE_CLOUD,
+            identity.ChassisAssetTag.AZURE_STACK,
         ],
     )
     def test_true_on_azure_chassis(
-        self, azure_ds, mock_chassis_asset_tag, tag, expected_is_azure_stack
+        self, azure_ds, mock_chassis_asset_tag, tag
     ):
         mock_chassis_asset_tag.return_value = tag
 
         assert azure_ds.ds_detect() is True
-        assert azure_ds._is_azure_stack is expected_is_azure_stack
 
     def test_true_on_azure_ovf_env_in_seed_dir(
         self, azure_ds, mock_chassis_asset_tag
@@ -3570,7 +3569,6 @@ class TestIsPlatformViable:
         seed_path.write_text("")
 
         assert azure_ds.ds_detect() is True
-        assert azure_ds._is_azure_stack is False
 
     def test_false_on_no_matching_azure_criteria(
         self, azure_ds, mock_chassis_asset_tag
@@ -4277,6 +4275,7 @@ class TestProvisioning:
         assert self.mock_dmi_read_dmi_data.mock_calls == [
             mock.call("chassis-asset-tag"),
             mock.call("system-uuid"),
+            mock.call("chassis-asset-tag"),
         ]
         assert (
             self.azure_ds.metadata["instance-id"]
@@ -4344,6 +4343,7 @@ class TestProvisioning:
 
     def test_disable_imds_and_wireserver_skips_dhcp(self, caplog):
         """With IMDS and Wireserver disabled, skip DHCP entirely."""
+        self.azure_ds.sys_cfg["datasource_list"] = ["Azure"]
         self._set_chassis_asset_tag(identity.ChassisAssetTag.AZURE_STACK)
         ovf = construct_ovf_env(
             disable_imds=True,
@@ -4382,6 +4382,7 @@ class TestProvisioning:
             contents=json.dumps(self.imds_md).encode()
         )
         self.mock_azure_get_metadata_from_fabric.return_value = []
+        caplog.clear()
 
         self.azure_ds._check_and_get_data()
 
