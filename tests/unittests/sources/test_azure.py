@@ -3694,6 +3694,70 @@ class TestInstanceId:
 
         assert id == "50109936-ef07-47fe-ac82-890c853f60d5"
 
+    def test_first_boot_without_previous_instance_id(self, azure_ds):
+        assert azure_ds._is_first_boot_for_current_instance() is True
+
+    @pytest.mark.parametrize(
+        "previous_instance_id,expected",
+        [
+            ("50109936-ef07-47fe-ac82-890c853f60d5", False),
+            ("50109936-EF07-47FE-AC82-890C853F60D5", False),
+            ("36991050-07EF-FE47-AC82-890C853F60D5", False),
+            ("11111111-1111-1111-1111-111111111111", True),
+            ("", True),
+        ],
+    )
+    def test_first_boot_compares_previous_instance_id(
+        self, azure_ds, paths, previous_instance_id, expected
+    ):
+        write_file(
+            os.path.join(paths.cloud_dir, "data", "instance-id"),
+            previous_instance_id,
+        )
+
+        assert azure_ds._is_first_boot_for_current_instance() is expected
+
+    def test_first_boot_on_previous_instance_id_read_error(
+        self, azure_ds, caplog, paths
+    ):
+        write_file(
+            os.path.join(paths.cloud_dir, "data", "instance-id"),
+            "50109936-ef07-47fe-ac82-890c853f60d5",
+        )
+
+        with mock.patch.object(
+            dsaz.util,
+            "load_text_file",
+            side_effect=OSError("read failure"),
+        ):
+            assert azure_ds._is_first_boot_for_current_instance() is True
+
+        assert "Failed to read previous Azure instance ID" in caplog.text
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RuntimeError("failed to read system-uuid"),
+            ValueError("badly formed hexadecimal UUID string"),
+        ],
+    )
+    def test_first_boot_on_system_uuid_error(
+        self, azure_ds, caplog, error, paths
+    ):
+        write_file(
+            os.path.join(paths.cloud_dir, "data", "instance-id"),
+            "50109936-ef07-47fe-ac82-890c853f60d5",
+        )
+
+        with mock.patch.object(
+            dsaz.identity,
+            "query_system_uuid",
+            side_effect=error,
+        ):
+            assert azure_ds._is_first_boot_for_current_instance() is True
+
+        assert "Failed to determine current Azure instance ID" in caplog.text
+
 
 class TestDetermineSecretsProvisioning:
     @pytest.fixture(autouse=True)
@@ -5398,6 +5462,87 @@ class TestCheckAzureProxyAgent:
 
 
 class TestGetMetadataFromImds:
+    def test_first_boot_validates_signed_metadata(
+        self, azure_ds, mock_monotonic
+    ):
+        azure_ds._secrets_provisioning_enabled = True
+        mock_monotonic.return_value = 0.0
+        raw_metadata = b'{"extended": {"SignatureInfo": {}}}'
+        metadata = {"extended": {"SignatureInfo": {}}}
+        calls = mock.Mock()
+
+        with mock.patch.object(
+            azure_ds,
+            "_is_first_boot_for_current_instance",
+            return_value=True,
+        ) as first_boot, mock.patch.object(
+            imds,
+            "fetch_metadata_and_raw_with_api_fallback",
+            return_value=(raw_metadata, metadata),
+        ) as fetch_raw, mock.patch.object(
+            imds,
+            "fetch_metadata_with_api_fallback",
+            autospec=True,
+        ) as fetch_standard, mock.patch.object(
+            dsaz.cvm,
+            "validate_imds_metadata",
+            autospec=True,
+        ) as validate:
+            calls.attach_mock(first_boot, "first_boot")
+            calls.attach_mock(fetch_raw, "fetch_raw")
+            calls.attach_mock(validate, "validate")
+
+            result = azure_ds.get_metadata_from_imds(report_failure=True)
+
+        assert result == metadata
+
+        assert calls.mock_calls == [
+            mock.call.first_boot(),
+            mock.call.fetch_raw(
+                max_connection_errors=11,
+                retry_deadline=300,
+                fallback_on_400=False,
+            ),
+            mock.call.validate(raw_metadata),
+        ]
+        fetch_standard.assert_not_called()
+
+    def test_subsequent_boot_skips_signed_metadata_validation(
+        self, azure_ds, mock_monotonic
+    ):
+        azure_ds._secrets_provisioning_enabled = True
+        mock_monotonic.return_value = 0.0
+        metadata = {"compute": {"vmId": "test-vm"}}
+
+        with mock.patch.object(
+            azure_ds,
+            "_is_first_boot_for_current_instance",
+            return_value=False,
+        ) as first_boot, mock.patch.object(
+            imds,
+            "fetch_metadata_and_raw_with_api_fallback",
+            autospec=True,
+        ) as fetch_raw, mock.patch.object(
+            imds,
+            "fetch_metadata_with_api_fallback",
+            autospec=True,
+            return_value=metadata,
+        ) as fetch_standard, mock.patch.object(
+            dsaz.cvm,
+            "validate_imds_metadata",
+            autospec=True,
+        ) as validate:
+            result = azure_ds.get_metadata_from_imds(report_failure=True)
+
+        assert result == metadata
+        first_boot.assert_called_once_with()
+        fetch_raw.assert_not_called()
+        fetch_standard.assert_called_once_with(
+            max_connection_errors=11,
+            retry_deadline=300,
+        )
+        validate.assert_not_called()
+
     def test_secrets_path_http_400_raises_unsupported_api_version(
         self, azure_ds, mock_monotonic
     ):

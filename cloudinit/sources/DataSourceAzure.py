@@ -966,6 +966,10 @@ class DataSourceAzure(sources.DataSource):
     def get_metadata_from_imds(self, report_failure: bool) -> Dict:
         start_time = monotonic()
         retry_deadline = start_time + 300
+        should_validate_imds_metadata = (
+            self._secrets_provisioning_enabled
+            and self._is_first_boot_for_current_instance()
+        )
 
         # As a temporary workaround to support Azure Stack implementations
         # which may not enable IMDS, limit connection errors to 11.
@@ -977,7 +981,7 @@ class DataSourceAzure(sources.DataSource):
         error_string: Optional[str] = None
         error_report: Optional[errors.ReportableError] = None
         try:
-            if self._secrets_provisioning_enabled:
+            if should_validate_imds_metadata:
                 md_raw, md = imds.fetch_metadata_and_raw_with_api_fallback(
                     max_connection_errors=max_connection_errors,
                     retry_deadline=retry_deadline,
@@ -997,7 +1001,7 @@ class DataSourceAzure(sources.DataSource):
                 cvm.validate_imds_metadata(md_raw)
             return md
         except UrlError as error:
-            if self._secrets_provisioning_enabled and error.code == 400:
+            if should_validate_imds_metadata and error.code == 400:
                 raise errors.ReportableErrorUnsupportedImdsApiVersion(
                     api_version=imds.IMDS_API_VERSION
                 ) from error
@@ -1194,6 +1198,44 @@ class DataSourceAzure(sources.DataSource):
         # quickly (local check only) if self.instance_id is still valid
         return sources.instance_id_matches_system_uuid(self.get_instance_id())
 
+    @staticmethod
+    def _instance_id_matches_system_uuid(
+        instance_id: str, system_uuid: str
+    ) -> bool:
+        swapped_id = identity.byte_swap_system_uuid(system_uuid)
+        return instance_id.lower() in (system_uuid, swapped_id)
+
+    def _is_first_boot_for_current_instance(self) -> bool:
+        previous_iid_path = os.path.join(
+            self.paths.get_cpath("data"), "instance-id"
+        )
+        try:
+            previous_iid = util.load_text_file(previous_iid_path).strip()
+        except FileNotFoundError:
+            return True
+        except OSError as error:
+            LOG.warning(
+                "Failed to read previous Azure instance ID from %s: %s",
+                previous_iid_path,
+                error,
+            )
+            return True
+
+        if not previous_iid:
+            return True
+        try:
+            system_uuid = identity.query_system_uuid()
+            return not self._instance_id_matches_system_uuid(
+                previous_iid, system_uuid
+            )
+        except (RuntimeError, ValueError) as error:
+            LOG.warning(
+                "Failed to determine current Azure instance ID; treating this "
+                "as first boot: %s",
+                error,
+            )
+            return True
+
     def _iid(self, previous=None):
         prev_iid_path = os.path.join(
             self.paths.get_cpath("data"), "instance-id"
@@ -1201,13 +1243,12 @@ class DataSourceAzure(sources.DataSource):
         system_uuid = identity.query_system_uuid()
         if os.path.exists(prev_iid_path):
             previous = util.load_text_file(prev_iid_path).strip()
-            swapped_id = identity.byte_swap_system_uuid(system_uuid)
 
             # Older kernels than 4.15 will have UPPERCASE product_uuid.
             # We don't want Azure to react to an UPPER/lower difference as
             # a new instance id as it rewrites SSH host keys.
             # LP: #1835584
-            if previous.lower() in [system_uuid, swapped_id]:
+            if self._instance_id_matches_system_uuid(previous, system_uuid):
                 return previous
         return system_uuid
 
