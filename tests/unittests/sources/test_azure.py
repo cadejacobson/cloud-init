@@ -3786,17 +3786,17 @@ class TestDetermineSecretsProvisioning:
         ) as m:
             yield m
 
-    def test_non_cvm_reports_failure(
+    def test_non_cvm_ignores_requirement_flags_and_falls_back(
         self,
         azure_ds,
         mock_is_cvm,
         mock_is_tool_present,
         mock_is_secrets_provisioning_enabled,
     ):
+        azure_ds.ds_cfg["require_azure_protected_secrets_tool"] = True
         mock_is_cvm.return_value = False
 
-        with pytest.raises(errors.ReportableErrorNotACvm):
-            azure_ds._determine_secrets_provisioning()
+        assert azure_ds._determine_secrets_provisioning() is False
         assert mock_is_tool_present.mock_calls == []
         assert mock_is_secrets_provisioning_enabled.mock_calls == []
 

@@ -258,13 +258,6 @@ class ReportableErrorRequiredSecretsToolNotFound(ReportableError):
         self.supporting_data["is_cvm"] = is_cvm
 
 
-class ReportableErrorNotACvm(ReportableError):
-    def __init__(self) -> None:
-        super().__init__(
-            "required CVM secrets provisioning but not a confidential VM"
-        )
-
-
 class ReportableErrorSecretsProvisioningNotEnabled(ReportableError):
     def __init__(self) -> None:
         super().__init__(

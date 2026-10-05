@@ -620,8 +620,8 @@ class DataSourceAzure(sources.DataSource):
         A confirmed CVM enters the path when azure-protected-secrets-tool is
         installed and reports secrets provisioning enabled, independently of
         the requirement flags. ``require_azure_cvm_secrets_provisioning``
-        makes undetermined CVM isolation, a definite non-CVM, a confirmed CVM
-        with a missing tool, or disabled provisioning fatal.
+        makes undetermined CVM isolation, or a confirmed CVM with a missing
+        tool or disabled provisioning, fatal.
         ``require_azure_protected_secrets_tool`` makes undetermined CVM
         isolation or a confirmed CVM with a missing tool fatal. Other outcomes
         fall back to normal provisioning.
@@ -629,7 +629,6 @@ class DataSourceAzure(sources.DataSource):
         :raises errors.ReportableErrorRequiredSecretsToolNotFound: when the
             required tool is not installed, or CVM isolation cannot be
             determined while either requirement is enabled.
-        :raises errors.ReportableErrorNotACvm: when the VM is not a CVM.
         :raises errors.ReportableErrorSecretsProvisioningNotEnabled: when the
             tool reports secrets provisioning is not enabled.
         """
@@ -657,13 +656,6 @@ class DataSourceAzure(sources.DataSource):
             return False
 
         if not detected_cvm:
-            if require_cvm_secrets:
-                report_diagnostic_event(
-                    "Required CVM secrets provisioning but VM is not a CVM.",
-                    logger_func=LOG.error,
-                )
-                raise errors.ReportableErrorNotACvm()
-
             report_diagnostic_event(
                 "VM is not a CVM: skipping secrets provisioning",
                 logger_func=LOG.debug,
