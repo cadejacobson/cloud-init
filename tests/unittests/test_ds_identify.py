@@ -550,6 +550,11 @@ class TestDsIdentify(DsIdentifyBase):
                 True,
                 id="azure_dmi_detection_from_chassis_asset_tag",
             ),
+            pytest.param(
+                "Azure-stack-dmi-detection",
+                True,
+                id="azure_stack_dmi_detection_from_chassis_asset_tag",
+            ),
             # Azure datasource is detected due to presence of a seed file.
             #
             # The seed file tested  is /var/lib/cloud/seed/azure/ovf-env.xml.
@@ -1635,6 +1640,10 @@ VALID_CFG = {
     "Azure-dmi-detection": {
         "ds": "Azure",
         "files": {P_CHASSIS_ASSET_TAG: "7783-7084-3265-9085-8269-3286-77\n"},
+    },
+    "Azure-stack-dmi-detection": {
+        "ds": "Azure",
+        "files": {P_CHASSIS_ASSET_TAG: "6590-8582-6932-7679-6765-7632-8677\n"},
     },
     "Azure-seed-detection": {
         "ds": "Azure",

@@ -1545,10 +1545,86 @@ class TestOvfEnvXml:
                     preprovisioned_vm_type="testpps",
                 ),
             ),
+            # Azure Stack DisableIMDS true.
+            (
+                construct_ovf_env(disable_imds=True),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_imds=True,
+                ),
+            ),
+            # Azure Stack DisableIMDS false.
+            (
+                construct_ovf_env(disable_imds=False),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_imds=False,
+                ),
+            ),
+            # Azure Stack DisableWireserver true.
+            (
+                construct_ovf_env(disable_wireserver=True),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_wireserver=True,
+                ),
+            ),
+            # Azure Stack DisableWireserver false.
+            (
+                construct_ovf_env(disable_wireserver=False),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    disable_wireserver=False,
+                ),
+            ),
+            # Azure Stack native v2 network config.
+            (
+                construct_ovf_env(
+                    network={
+                        "version": 2,
+                        "ethernets": {
+                            "eth0": {"dhcp4": True},
+                        },
+                    },
+                ),
+                azure_helper.OvfEnvXml(
+                    username="test-user",
+                    hostname="test-host",
+                    network={
+                        "version": 2,
+                        "ethernets": {
+                            "eth0": {"dhcp4": True},
+                        },
+                    },
+                ),
+            ),
         ],
     )
     def test_valid_ovf_scenarios(self, ovf, expected):
         assert azure_helper.OvfEnvXml.parse_text(ovf) == expected
+
+    def test_missing_azure_stack_section_is_not_logged(self, caplog):
+        parsed = azure_helper.OvfEnvXml.parse_text(construct_ovf_env())
+
+        assert parsed.disable_imds is False
+        assert parsed.disable_wireserver is False
+        assert (
+            "missing configuration for 'AzureStackConfigurationSection'"
+            not in caplog.text
+        )
+
+    def test_missing_azure_stack_properties_use_defaults(self):
+        parsed = azure_helper.OvfEnvXml.parse_text(
+            construct_ovf_env(disable_imds=True)
+        )
+
+        assert parsed.disable_imds is True
+        assert parsed.disable_wireserver is False
+        assert parsed.network is None
 
     @pytest.mark.parametrize(
         "ovf,error",
@@ -1651,6 +1727,75 @@ class TestOvfEnvXml:
             == "unexpected metadata parsing ovf-env.xml: "
             "multiple configuration matches for 'HostName' (2)"
         )
+
+    def test_invalid_network_yaml_fails(self):
+        ovf = """\
+            <ns0:Environment xmlns="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns0="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns1="http://schemas.microsoft.com/windowsazure"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ns1:ProvisioningSection>
+            <ns1:LinuxProvisioningConfigurationSet>
+            <ns1:ConfigurationSetType>
+            LinuxProvisioningConfiguration
+            </ns1:ConfigurationSetType>
+            <ns1:HostName>test-host</ns1:HostName>
+            <ns1:UserName>test-user</ns1:UserName>
+            </ns1:LinuxProvisioningConfigurationSet>
+            </ns1:ProvisioningSection>
+            <ns1:PlatformSettingsSection>
+            <ns1:Version>1.0</ns1:Version>
+            <ns1:PlatformSettings>
+            </ns1:PlatformSettings>
+            </ns1:PlatformSettingsSection>
+            <ns1:AzureStackConfigurationSection>
+            <ns1:Network>ZXRoZXJuZXRzOiBbZXRoMA==</ns1:Network>
+            </ns1:AzureStackConfigurationSection>
+            </ns0:Environment>"""
+
+        with pytest.raises(
+            errors.ReportableErrorOvfInvalidMetadata
+        ) as exc_info:
+            azure_helper.OvfEnvXml.parse_text(ovf)
+
+        assert (
+            exc_info.value.reason
+            == "unexpected metadata parsing ovf-env.xml: "
+            "failed to parse 'Network' as YAML"
+        )
+
+    def test_network_yaml_is_parsed(self):
+        # <Network> may be authored as native v2 YAML, not only JSON.
+        ovf = """\
+            <ns0:Environment xmlns="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns0="http://schemas.dmtf.org/ovf/environment/1"
+             xmlns:ns1="http://schemas.microsoft.com/windowsazure"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ns1:ProvisioningSection>
+            <ns1:LinuxProvisioningConfigurationSet>
+            <ns1:ConfigurationSetType>
+            LinuxProvisioningConfiguration
+            </ns1:ConfigurationSetType>
+            <ns1:HostName>test-host</ns1:HostName>
+            <ns1:UserName>test-user</ns1:UserName>
+            </ns1:LinuxProvisioningConfigurationSet>
+            </ns1:ProvisioningSection>
+            <ns1:PlatformSettingsSection>
+            <ns1:Version>1.0</ns1:Version>
+            <ns1:PlatformSettings>
+            </ns1:PlatformSettings>
+            </ns1:PlatformSettingsSection>
+            <ns1:AzureStackConfigurationSection>
+            <ns1:Network>dmVyc2lvbjogMgpldGhlcm5ldHM6CiAgZXRoMDoKICAgIGRoY3A0OiB0cnVlCg==</ns1:Network>
+            </ns1:AzureStackConfigurationSection>
+            </ns0:Environment>"""
+
+        ovf_env = azure_helper.OvfEnvXml.parse_text(ovf)
+
+        assert ovf_env.network == {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": True}},
+        }
 
     def test_non_azure_ovf(self):
         ovf = """\

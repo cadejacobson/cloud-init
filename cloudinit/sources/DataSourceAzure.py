@@ -345,12 +345,19 @@ class DataSourceAzure(sources.DataSource):
         )
         self._iso_dev: Optional[str] = None
         self._network_config: Optional[Dict[str, Any]] = None
+        self._ovf_network_config: Optional[Dict[str, Any]] = None
         self._ephemeral_dhcp_ctx: Optional[EphemeralDHCPv4] = None
         self._reported_ready_marker_file = os.path.join(
             paths.cloud_dir, "data", "reported_ready"
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._disable_imds = False
+        self._disable_wireserver = False
+        self._chassis_asset_tag: Union[str, identity.ChassisAssetTag, None] = (
+            sources.UNSET
+        )
+        self._is_azure_stack = False
         self._system_uuid: Optional[str] = None
         self._vm_id: Optional[str] = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -360,11 +367,16 @@ class DataSourceAzure(sources.DataSource):
 
         self._ephemeral_dhcp_ctx = None
         self._iso_dev = None
+        self._ovf_network_config = None
         self._reported_ready_marker_file = os.path.join(
             self.paths.cloud_dir, "data", "reported_ready"
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._disable_imds = False
+        self._disable_wireserver = False
+        self._chassis_asset_tag = sources.UNSET
+        self._is_azure_stack = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -721,17 +733,58 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
+        if self._chassis_asset_tag is sources.UNSET:
+            self._chassis_asset_tag = identity.ChassisAssetTag.query_system()
+            self._is_azure_stack = (
+                self._chassis_asset_tag is identity.ChassisAssetTag.AZURE_STACK
+            )
+
+        if self._is_azure_stack:
+            self._disable_imds = bool(cfg.get("DisableIMDS"))
+            self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+            self._ovf_network_config = cfg.get("Network")
+
+            if self._disable_imds:
+                report_diagnostic_event(
+                    "DisableIMDS: True",
+                    logger_func=LOG.info,
+                )
+            if self._disable_wireserver:
+                report_diagnostic_event(
+                    "DisableWireserver: True",
+                    logger_func=LOG.info,
+                )
+            if self._ovf_network_config is not None:
+                report_diagnostic_event(
+                    "Network config provided in ovf-env.xml.",
+                    logger_func=LOG.info,
+                )
+
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
         # not have UDF support.  In either case, require IMDS metadata.
         # If we require IMDS metadata, try harder to obtain networking, waiting
-        # for at least 20 minutes.  Otherwise only wait 5 minutes.
-        requires_imds_metadata = bool(self._iso_dev) or self.seed is None
-        timeout_minutes = 20 if requires_imds_metadata else 5
-        try:
-            self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
-        except NoDHCPLeaseError:
-            pass
+        # for at least 20 minutes.  Otherwise only wait 5 minutes.  With IMDS
+        # disabled we never query it, so do not wait longer on its behalf.
+        # Networking only exists to reach IMDS and/or Wireserver, so skip DHCP
+        # entirely when both are disabled.
+        if self._disable_imds and self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping DHCP setup: DisableIMDS and DisableWireserver are "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+        else:
+            requires_imds_metadata = not self._disable_imds and (
+                bool(self._iso_dev) or self.seed is None
+            )
+            timeout_minutes = 20 if requires_imds_metadata else 5
+            try:
+                self._setup_ephemeral_networking(
+                    timeout_minutes=timeout_minutes
+                )
+            except NoDHCPLeaseError:
+                pass
 
         imds_md = {}
         if self._is_ephemeral_networking_up():
@@ -906,6 +959,13 @@ class DataSourceAzure(sources.DataSource):
 
     @azure_ds_telemetry_reporter
     def get_metadata_from_imds(self, report_failure: bool) -> Dict:
+        if self._disable_imds:
+            report_diagnostic_event(
+                "Skipping IMDS query: DisableIMDS is set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return {}
+
         start_time = monotonic()
         retry_deadline = start_time + 300
 
@@ -961,6 +1021,10 @@ class DataSourceAzure(sources.DataSource):
         run.
         """
         chassis_tag = identity.ChassisAssetTag.query_system()
+        self._chassis_asset_tag = chassis_tag
+        self._is_azure_stack = (
+            chassis_tag is identity.ChassisAssetTag.AZURE_STACK
+        )
         if chassis_tag is not None:
             return True
 
@@ -1470,6 +1534,14 @@ class DataSourceAzure(sources.DataSource):
         if host_only:
             return reported
 
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping failure report to Wireserver: DisableWireserver is "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return reported
+
         if self._is_ephemeral_networking_up():
             try:
                 report_diagnostic_event(
@@ -1529,6 +1601,16 @@ class DataSourceAzure(sources.DataSource):
         """
         report_dmesg_to_kvp()
         kvp.report_success_to_host(vm_id=self._vm_id)
+
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping Wireserver report ready: DisableWireserver is set "
+                "in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            self._iso_dev = None
+            self._negotiated = True
+            return None
 
         try:
             data = get_metadata_from_fabric(
@@ -1671,6 +1753,11 @@ class DataSourceAzure(sources.DataSource):
                     "from IMDS network metadata: %s",
                     str(e),
                 )
+
+        if self._ovf_network_config and self.ds_cfg.get(
+            "apply_network_config"
+        ):
+            return self._ovf_network_config
 
         # Generate fallback configuration.
         try:
@@ -2001,7 +2088,7 @@ def write_files(datadir, files, dirmode=None):
 
 @azure_ds_telemetry_reporter
 def read_azure_ovf(
-    contents: str,
+    contents: Union[bytes, str],
 ) -> Tuple[Dict[str, Any], Union[bytes, str], Dict[str, Any]]:
     """Parse OVF XML contents.
 
@@ -2010,6 +2097,17 @@ def read_azure_ovf(
     :raises NonAzureDataSource: if XML is not in Azure's format.
     :raises errors.ReportableError: if XML is unparsable or invalid.
     """
+    # DEBUG: DO NOT MERGE -- logs raw ovf-env.xml (may contain secrets) to
+    # diagnose provisioning. Logged before parse so it survives a parse
+    # failure. Remove before production.
+    LOG.warning(
+        "Reading ovf-env.xml: %s",
+        (
+            contents.decode("utf-8", "ignore")
+            if isinstance(contents, bytes)
+            else contents
+        ),
+    )
     ovf_env = OvfEnvXml.parse_text(contents)
     md: Dict[str, Any] = {}
     cfg: Dict[str, Any] = {}
@@ -2054,6 +2152,27 @@ def read_azure_ovf(
         "ProvisionGuestProxyAgent: %s" % ovf_env.provision_guest_proxy_agent,
         logger_func=LOG.info,
     )
+
+    cfg["DisableIMDS"] = ovf_env.disable_imds
+    if ovf_env.disable_imds:
+        report_diagnostic_event(
+            "DisableIMDS: True",
+            logger_func=LOG.info,
+        )
+
+    cfg["DisableWireserver"] = ovf_env.disable_wireserver
+    if ovf_env.disable_wireserver:
+        report_diagnostic_event(
+            "DisableWireserver: True",
+            logger_func=LOG.info,
+        )
+
+    if ovf_env.network is not None:
+        cfg["Network"] = ovf_env.network
+        report_diagnostic_event(
+            "Network config provided in ovf-env.xml.",
+            logger_func=LOG.info,
+        )
     return (md, ud, cfg)
 
 
@@ -2122,6 +2241,15 @@ def load_azure_ds_dir(source_dir):
 
     with performance.Timed("Reading ovf-env.xml"), open(ovf_file, "rb") as fp:
         contents = fp.read()
+
+    # DEBUG: DO NOT MERGE -- dumps raw provisioning media (may contain
+    # secrets) to diagnose provisioning. Remove before production.
+    debug_ovf_path = Path("/run/cloud-init/ovf-env.xml")
+    try:
+        debug_ovf_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_ovf_path.write_bytes(contents)
+    except OSError as e:
+        LOG.warning("Failed to write debug OVF to %s: %s", debug_ovf_path, e)
 
     md, ud, cfg = read_azure_ovf(contents)
     return (md, ud, cfg, {"ovf-env.xml": contents})

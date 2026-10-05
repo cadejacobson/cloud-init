@@ -15,6 +15,8 @@ from typing import Callable, List, Optional, TypeVar, Union
 from xml.etree import ElementTree as ET  # nosec B405
 from xml.sax.saxutils import escape  # nosec B406
 
+import yaml
+
 from cloudinit import distros, subp, temp_utils, url_helper, util, version
 from cloudinit.reporting import events
 from cloudinit.sources.azure import certs, errors
@@ -984,6 +986,9 @@ class OvfEnvXml:
         preprovisioned_vm: bool = False,
         preprovisioned_vm_type: Optional[str] = None,
         provision_guest_proxy_agent: bool = False,
+        disable_imds: bool = False,
+        disable_wireserver: bool = False,
+        network: Optional[dict] = None,
     ) -> None:
         self.username = username
         self.password = password
@@ -994,12 +999,15 @@ class OvfEnvXml:
         self.preprovisioned_vm = preprovisioned_vm
         self.preprovisioned_vm_type = preprovisioned_vm_type
         self.provision_guest_proxy_agent = provision_guest_proxy_agent
+        self.disable_imds = disable_imds
+        self.disable_wireserver = disable_wireserver
+        self.network = network
 
     def __eq__(self, other) -> bool:
         return self.__dict__ == other.__dict__
 
     @classmethod
-    def parse_text(cls, ovf_env_xml: str) -> "OvfEnvXml":
+    def parse_text(cls, ovf_env_xml: Union[bytes, str]) -> "OvfEnvXml":
         """Parser for ovf-env.xml data.
 
         :raises NonAzureDataSource: if XML is not in Azure's format.
@@ -1020,6 +1028,7 @@ class OvfEnvXml:
         instance = OvfEnvXml()
         instance._parse_linux_configuration_set_section(root)
         instance._parse_platform_settings_section(root)
+        instance._parse_azure_stack_configuration_section(root)
 
         return instance
 
@@ -1054,6 +1063,7 @@ class OvfEnvXml:
         required: bool,
         decode_base64: bool = False,
         parse_bool: bool = False,
+        parse_yaml: bool = False,
         default=None,
     ):
         matches = node.findall("./wa:" + name, OvfEnvXml.NAMESPACES)
@@ -1081,6 +1091,14 @@ class OvfEnvXml:
 
         if parse_bool:
             value = util.translate_bool(value)
+
+        if parse_yaml and value is not None:
+            try:
+                value = yaml.safe_load(value)
+            except yaml.YAMLError as e:
+                raise errors.ReportableErrorOvfInvalidMetadata(
+                    "failed to parse %r as YAML" % name
+                ) from e
 
         return value
 
@@ -1150,6 +1168,41 @@ class OvfEnvXml:
             "ProvisionGuestProxyAgent",
             parse_bool=True,
             default=False,
+            required=False,
+        )
+
+    def _parse_azure_stack_configuration_section(self, root):
+        """Parse the optional Azure Stack configuration section."""
+        if (
+            root.find(
+                "./wa:AzureStackConfigurationSection", OvfEnvXml.NAMESPACES
+            )
+            is None
+        ):
+            return
+
+        section = self._find(
+            root, "AzureStackConfigurationSection", required=False
+        )
+        self.disable_imds = self._parse_property(
+            section,
+            "DisableIMDS",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+        self.disable_wireserver = self._parse_property(
+            section,
+            "DisableWireserver",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+        self.network = self._parse_property(
+            section,
+            "Network",
+            decode_base64=True,
+            parse_yaml=True,
             required=False,
         )
 
