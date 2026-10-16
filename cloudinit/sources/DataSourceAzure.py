@@ -13,6 +13,7 @@ import socket
 import warnings
 import xml.etree.ElementTree as ET  # nosec B405
 from enum import Enum
+from functools import cached_property
 from pathlib import Path
 from time import monotonic, sleep, time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -345,12 +346,15 @@ class DataSourceAzure(sources.DataSource):
         )
         self._iso_dev: Optional[str] = None
         self._network_config: Optional[Dict[str, Any]] = None
+        self._ovf_network_config: Optional[Dict[str, Any]] = None
         self._ephemeral_dhcp_ctx: Optional[EphemeralDHCPv4] = None
         self._reported_ready_marker_file = os.path.join(
             paths.cloud_dir, "data", "reported_ready"
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._disable_imds = False
+        self._disable_wireserver = False
         self._system_uuid: Optional[str] = None
         self._vm_id: Optional[str] = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
@@ -360,14 +364,19 @@ class DataSourceAzure(sources.DataSource):
 
         self._ephemeral_dhcp_ctx = None
         self._iso_dev = None
+        self._ovf_network_config = None
         self._reported_ready_marker_file = os.path.join(
             self.paths.cloud_dir, "data", "reported_ready"
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
+        self._disable_imds = False
+        self._disable_wireserver = False
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
+        # A cached datasource may have been restored on different hardware.
+        self.__dict__.pop("_chassis_asset_tag", None)
         for key in (
             "apply_network_config_for_secondary_ips",
             "experimental_fail_on_missing_customdata",
@@ -379,6 +388,34 @@ class DataSourceAzure(sources.DataSource):
     def __str__(self):
         root = sources.DataSource.__str__(self)
         return "%s [seed=%s]" % (root, self.seed)
+
+    @cached_property
+    def _chassis_asset_tag(self) -> Optional[identity.ChassisAssetTag]:
+        return identity.ChassisAssetTag.query_system()
+
+    def _apply_azure_local_config(self, cfg: Dict[str, Any]) -> None:
+        """Apply OVF service and network options only on Azure Local."""
+        self._network_config = None
+        self._disable_imds = False
+        self._disable_wireserver = False
+        self._ovf_network_config = None
+        if self._chassis_asset_tag is not identity.ChassisAssetTag.AZURE_LOCAL:
+            return
+
+        self._disable_imds = bool(cfg.get("DisableIMDS"))
+        self._disable_wireserver = bool(cfg.get("DisableWireserver"))
+        self._ovf_network_config = cfg.get("Network")
+        if self._disable_imds:
+            report_diagnostic_event("DisableIMDS: True", logger_func=LOG.info)
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "DisableWireserver: True", logger_func=LOG.info
+            )
+        if self._ovf_network_config is not None:
+            report_diagnostic_event(
+                "Network config provided in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
 
     def _get_subplatform(self):
         """Return the subplatform metadata source details."""
@@ -721,17 +758,38 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
+        self._apply_azure_local_config(cfg)
+        pps_type = PPSType.NONE
+        if self._disable_imds:
+            pps_type = self._determine_pps_type(cfg, {})
+            if pps_type != PPSType.NONE:
+                raise errors.ReportableErrorOvfInvalidMetadata(
+                    "preprovisioning requires IMDS"
+                )
+
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
         # not have UDF support.  In either case, require IMDS metadata.
         # If we require IMDS metadata, try harder to obtain networking, waiting
         # for at least 20 minutes.  Otherwise only wait 5 minutes.
-        requires_imds_metadata = bool(self._iso_dev) or self.seed is None
-        timeout_minutes = 20 if requires_imds_metadata else 5
-        try:
-            self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
-        except NoDHCPLeaseError:
-            pass
+        # Skip DHCP entirely when neither service is enabled.
+        if self._disable_imds and self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping DHCP setup: DisableIMDS and DisableWireserver are "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+        else:
+            requires_imds_metadata = not self._disable_imds and (
+                bool(self._iso_dev) or self.seed is None
+            )
+            timeout_minutes = 20 if requires_imds_metadata else 5
+            try:
+                self._setup_ephemeral_networking(
+                    timeout_minutes=timeout_minutes
+                )
+            except NoDHCPLeaseError:
+                pass
 
         imds_md = {}
         if self._is_ephemeral_networking_up():
@@ -750,7 +808,8 @@ class DataSourceAzure(sources.DataSource):
         self.seed = self.seed or "IMDS"
 
         # Refresh PPS type using metadata.
-        pps_type = self._determine_pps_type(cfg, imds_md)
+        if not self._disable_imds:
+            pps_type = self._determine_pps_type(cfg, imds_md)
         if pps_type != PPSType.NONE:
             self.seed = "IMDS"
 
@@ -775,6 +834,7 @@ class DataSourceAzure(sources.DataSource):
                 self._wait_for_pps_unknown_reuse()
 
             md, userdata_raw, cfg, files = self._reprovision()
+            self._apply_azure_local_config(cfg)
             if cfg.get("ProvisionGuestProxyAgent"):
                 self._check_azure_proxy_agent_status()
 
@@ -791,7 +851,8 @@ class DataSourceAzure(sources.DataSource):
                 )
 
         # Report errors if IMDS network configuration is missing data.
-        self.validate_imds_network_metadata(imds_md=imds_md)
+        if not self._disable_imds:
+            self.validate_imds_network_metadata(imds_md=imds_md)
 
         crawled_data.update(
             {
@@ -878,7 +939,9 @@ class DataSourceAzure(sources.DataSource):
             crawled_data["metadata"]["random_seed"] = seed
         crawled_data["metadata"]["instance-id"] = self._iid()
 
-        if self._negotiated is False and self._is_ephemeral_networking_up():
+        if self._negotiated is False and (
+            self._disable_wireserver or self._is_ephemeral_networking_up()
+        ):
             if self.ds_cfg.get("experimental_skip_ready_report", False):
                 LOG.debug(
                     "Skipping final health report as "
@@ -887,9 +950,11 @@ class DataSourceAzure(sources.DataSource):
             else:
                 # Report ready and fetch public-keys from Wireserver,
                 # if required.
-                pubkey_info = self._determine_wireserver_pubkey_info(
-                    cfg=cfg, imds_md=imds_md
-                )
+                pubkey_info = None
+                if not self._disable_wireserver:
+                    pubkey_info = self._determine_wireserver_pubkey_info(
+                        cfg=cfg, imds_md=imds_md
+                    )
                 try:
                     ssh_keys = self._report_ready(pubkey_info=pubkey_info)
                 except Exception:
@@ -906,6 +971,13 @@ class DataSourceAzure(sources.DataSource):
 
     @azure_ds_telemetry_reporter
     def get_metadata_from_imds(self, report_failure: bool) -> Dict:
+        if self._disable_imds:
+            report_diagnostic_event(
+                "Skipping IMDS query: DisableIMDS is set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return {}
+
         start_time = monotonic()
         retry_deadline = start_time + 300
 
@@ -960,8 +1032,7 @@ class DataSourceAzure(sources.DataSource):
         """Check platform environment to report if this datasource may
         run.
         """
-        chassis_tag = identity.ChassisAssetTag.query_system()
-        if chassis_tag is not None:
+        if self._chassis_asset_tag is not None:
             return True
 
         # If no valid chassis tag, check for seeded ovf-env.xml.
@@ -1470,6 +1541,14 @@ class DataSourceAzure(sources.DataSource):
         if host_only:
             return reported
 
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping failure report to Wireserver: DisableWireserver is "
+                "set in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            return reported
+
         if self._is_ephemeral_networking_up():
             try:
                 report_diagnostic_event(
@@ -1529,6 +1608,16 @@ class DataSourceAzure(sources.DataSource):
         """
         report_dmesg_to_kvp()
         kvp.report_success_to_host(vm_id=self._vm_id)
+
+        if self._disable_wireserver:
+            report_diagnostic_event(
+                "Skipping Wireserver report ready: DisableWireserver is set "
+                "in ovf-env.xml.",
+                logger_func=LOG.info,
+            )
+            self._iso_dev = None
+            self._negotiated = True
+            return None
 
         try:
             data = get_metadata_from_fabric(
@@ -1652,8 +1741,10 @@ class DataSourceAzure(sources.DataSource):
     def _generate_network_config(self):
         """Generate network configuration according to configuration."""
         # Use IMDS network metadata, if configured.
-        if isinstance(self._metadata_imds, dict) and self.ds_cfg.get(
-            "apply_network_config"
+        if (
+            not self._disable_imds
+            and isinstance(self._metadata_imds, dict)
+            and self.ds_cfg.get("apply_network_config")
         ):
             try:
                 return generate_network_config_from_instance_network_metadata(
@@ -1671,6 +1762,11 @@ class DataSourceAzure(sources.DataSource):
                     "from IMDS network metadata: %s",
                     str(e),
                 )
+
+        if self._ovf_network_config and self.ds_cfg.get(
+            "apply_network_config"
+        ):
+            return self._ovf_network_config
 
         # Generate fallback configuration.
         try:
@@ -2054,6 +2150,10 @@ def read_azure_ovf(
         "ProvisionGuestProxyAgent: %s" % ovf_env.provision_guest_proxy_agent,
         logger_func=LOG.info,
     )
+    cfg["DisableIMDS"] = ovf_env.disable_imds
+    cfg["DisableWireserver"] = ovf_env.disable_wireserver
+    if ovf_env.network is not None:
+        cfg["Network"] = ovf_env.network
     return (md, ud, cfg)
 
 

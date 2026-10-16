@@ -1390,6 +1390,62 @@ class TestGetMetadataGoalStateXMLAndReportFailureToFabric:
 
 
 class TestOvfEnvXml:
+    @pytest.mark.parametrize("value", [None, False, True])
+    def test_azure_stack_flags(self, value):
+        parsed = azure_helper.OvfEnvXml.parse_text(
+            construct_ovf_env(disable_imds=value, disable_wireserver=value)
+        )
+
+        assert parsed.disable_imds is bool(value)
+        assert parsed.disable_wireserver is bool(value)
+        assert parsed.network is None
+
+    def test_missing_azure_stack_section_is_not_logged(self, caplog):
+        azure_helper.OvfEnvXml.parse_text(construct_ovf_env())
+
+        assert "AzureStackConfigurationSection" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "network",
+        [
+            {"version": 2, "ethernets": {"eth0": {"dhcp4": True}}},
+            "version: 2\nethernets:\n  eth0:\n    dhcp4: true\n",
+        ],
+    )
+    def test_azure_stack_network(self, network):
+        parsed = azure_helper.OvfEnvXml.parse_text(
+            construct_ovf_env(network=network)
+        )
+
+        assert parsed.network == {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": True}},
+        }
+        assert parsed.disable_imds is False
+        assert parsed.disable_wireserver is False
+
+    @pytest.mark.parametrize(
+        "network",
+        ["ethernets: [eth0", "- eth0", "true", "version: 1"],
+    )
+    def test_invalid_azure_stack_network(self, network):
+        with pytest.raises(errors.ReportableErrorOvfInvalidMetadata):
+            azure_helper.OvfEnvXml.parse_text(
+                construct_ovf_env(network=network)
+            )
+
+    def test_duplicate_azure_stack_sections(self):
+        ovf = construct_ovf_env(disable_imds=True).replace(
+            "</ns0:Environment>",
+            "<ns1:AzureStackConfigurationSection/></ns0:Environment>",
+        )
+
+        with pytest.raises(
+            errors.ReportableErrorOvfInvalidMetadata,
+            match="multiple configuration matches",
+        ):
+            azure_helper.OvfEnvXml.parse_text(ovf)
+
     @pytest.mark.parametrize(
         "ovf,expected",
         [

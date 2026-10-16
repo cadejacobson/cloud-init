@@ -89,6 +89,73 @@ An example configuration with the default values is provided below:
          ephemeral0: /dev/disk/cloud/azure_resource
 
 
+Azure Local
+===========
+
+Azure Local instances are identified by the DMI chassis asset tag
+``6590-8582-6932-7679-6765-7632-8677``. These instances can provide an optional
+``AzureStackConfigurationSection`` alongside ``ProvisioningSection`` and
+``PlatformSettingsSection`` in :file:`ovf-env.xml`, using the
+``http://schemas.microsoft.com/windowsazure`` namespace.
+
+The section supports the following fields:
+
+* ``DisableIMDS``: Boolean, default ``false``. When ``true``, cloud-init does
+  not query IMDS for instance metadata.
+* ``DisableWireserver``: Boolean, default ``false``. When ``true``, cloud-init
+  does not contact Wireserver to report provisioning success or failure, or to
+  retrieve SSH keys. Host reporting via Hyper-V KVP continues even without
+  ephemeral networking.
+* ``Network``: Base64-encoded YAML containing a native
+  :ref:`network version 2 <network_config_v2>` configuration dictionary.
+  Cloud-init uses this configuration when IMDS network metadata is unavailable
+  or cannot be converted, before generating fallback DHCP configuration.
+  As with IMDS network configuration, ``apply_network_config`` must be
+  ``true``.
+
+These options are applied only on Azure Local, including when the datasource
+list is explicitly restricted to Azure or Azure is selected on the kernel
+command line using ``ds=Azure``. Platform identity is resolved independently
+of datasource selection and refreshed when restoring a cached datasource.
+The options are reapplied from provisioning data, including cached OVF data
+on subsequent boots and new OVF data received during reprovisioning.
+
+These options do not change public Azure behaviour. When both services are
+disabled, cloud-init skips ephemeral DHCP discovery for the datasource.
+Disabling only IMDS reduces the ephemeral DHCP timeout from 20 to 5 minutes
+when provisioning from attached media. Cloud-init does not validate or generate
+network configuration from IMDS metadata when IMDS is intentionally disabled.
+
+Preprovisioning requires IMDS to retrieve reprovisioning data. Configuring
+``DisableIMDS`` on an instance still in a preprovisioning pool is unsupported
+and is rejected before ephemeral networking or the reuse workflow is started.
+
+For example:
+
+.. code-block:: xml
+
+   <wa:AzureStackConfigurationSection
+       xmlns:wa="http://schemas.microsoft.com/windowsazure">
+     <wa:DisableIMDS>true</wa:DisableIMDS>
+     <wa:DisableWireserver>true</wa:DisableWireserver>
+     <wa:Network>
+       dmVyc2lvbjogMgpldGhlcm5ldHM6CiAgZXRoMDoKICAgIGRoY3A0OiB0cnVlCg==
+     </wa:Network>
+   </wa:AzureStackConfigurationSection>
+
+The ``Network`` value above decodes to:
+
+.. code-block:: yaml
+
+   version: 2
+   ethernets:
+     eth0:
+       dhcp4: true
+
+When Wireserver is disabled, provide SSH public key values directly in the OVF
+rather than fingerprints that require Wireserver retrieval.
+
+
 User-data
 =========
 

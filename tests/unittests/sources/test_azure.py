@@ -101,7 +101,7 @@ def mock_chassis_asset_tag():
     with mock.patch.object(
         identity.ChassisAssetTag,
         "query_system",
-        return_value=identity.ChassisAssetTag.AZURE_CLOUD.value,
+        return_value=identity.ChassisAssetTag.AZURE_CLOUD,
     ) as m:
         yield m
 
@@ -438,6 +438,9 @@ def construct_ovf_env(
     preprovisioned_vm=None,
     preprovisioned_vm_type=None,
     provision_guest_proxy_agent=None,
+    disable_imds=None,
+    disable_wireserver=None,
+    network=None,
 ):
     content = [
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -520,8 +523,31 @@ def construct_ovf_env(
     content += [
         "</ns1:PlatformSettings>",
         "</ns1:PlatformSettingsSection>",
-        "</ns0:Environment>",
     ]
+    if any(
+        value is not None
+        for value in (disable_imds, disable_wireserver, network)
+    ):
+        content.append("<ns1:AzureStackConfigurationSection>")
+        for name, value in (
+            ("DisableIMDS", disable_imds),
+            ("DisableWireserver", disable_wireserver),
+        ):
+            if value is not None:
+                content.append(
+                    "<ns1:%s>%s</ns1:%s>" % (name, str(value).lower(), name)
+                )
+        if network is not None:
+            content.append(
+                "<ns1:Network>%s</ns1:Network>"
+                % b64e(
+                    network
+                    if isinstance(network, str)
+                    else json.dumps(network)
+                )
+            )
+        content.append("</ns1:AzureStackConfigurationSection>")
+    content.append("</ns0:Environment>")
 
     return "\n".join(content)
 
@@ -1082,6 +1108,44 @@ class TestGenerateNetworkConfig:
 
 
 class TestNetworkConfig:
+    def test_disabled_imds_uses_ovf_without_metadata_errors(
+        self, azure_ds, caplog
+    ):
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": False}}}
+        azure_ds._disable_imds = True
+        azure_ds._metadata_imds = NETWORK_METADATA
+        azure_ds._ovf_network_config = network
+
+        assert azure_ds.network_config == network
+        assert "Failed generating network config from IMDS" not in caplog.text
+
+    @pytest.mark.parametrize("metadata", [UNSET, {}])
+    def test_uses_ovf_network_config(self, azure_ds, metadata):
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": False}}}
+        azure_ds._metadata_imds = metadata
+        azure_ds._ovf_network_config = network
+
+        assert azure_ds.network_config == network
+
+    def test_imds_takes_priority_over_ovf(self, azure_ds, mock_get_interfaces):
+        azure_ds._metadata_imds = NETWORK_METADATA
+        expected = azure_ds._generate_network_config()
+        azure_ds._ovf_network_config = {
+            "version": 2,
+            "ethernets": {"eth0": {"dhcp4": False}},
+        }
+
+        assert azure_ds.network_config == expected
+
+    def test_ignores_ovf_when_apply_network_config_false(
+        self, azure_ds, mock_generate_fallback_config
+    ):
+        azure_ds.ds_cfg["apply_network_config"] = False
+        azure_ds._ovf_network_config = {"version": 2, "ethernets": {}}
+        mock_generate_fallback_config.return_value = self.fallback_config
+
+        assert azure_ds.network_config == self.fallback_config
+
     fallback_config = {
         "version": 1,
         "config": [
@@ -1195,6 +1259,54 @@ def waagent_d(tmp_path):
 
 # @pytest.mark.usefixtures("fake_filesystem")
 class TestAzureDataSource:
+    def test_azure_local_options_restored_from_cached_ovf(
+        self, get_ds, mocker, waagent_d
+    ):
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": True}}}
+        dsrc = get_ds(
+            {
+                "ovfcontent": construct_ovf_env(
+                    disable_imds=True,
+                    disable_wireserver=True,
+                    network=network,
+                ),
+                "sys_cfg": {"datasource_list": ["Azure"]},
+            },
+            write_ovf_to_data_dir=True,
+            write_ovf_to_seed_dir=False,
+        )
+        mock_chassis = mocker.patch.object(
+            identity.ChassisAssetTag,
+            "query_system",
+            return_value=identity.ChassisAssetTag.AZURE_LOCAL,
+        )
+        mocker.patch.object(
+            dsaz.util,
+            "mount_cb",
+            side_effect=MountFailedError("No provisioning media"),
+        )
+        mock_setup = mocker.patch.object(dsrc, "_setup_ephemeral_networking")
+
+        assert dsrc._check_and_get_data() is True
+        assert dsrc.seed == waagent_d
+        assert dsrc._chassis_asset_tag is identity.ChassisAssetTag.AZURE_LOCAL
+        assert dsrc.network_config == network
+        state = dsrc.__getstate__()
+        restored = dsaz.DataSourceAzure.__new__(dsaz.DataSourceAzure)
+        restored.__setstate__(state)
+        mock_chassis.reset_mock()
+
+        assert restored._check_and_get_data() is True
+
+        mock_chassis.assert_called_once_with()
+        mock_setup.assert_not_called()
+        self.m_fetch.assert_not_called()
+        self.m_get_metadata_from_fabric.assert_not_called()
+        assert restored._disable_imds is True
+        assert restored._disable_wireserver is True
+        assert restored._ovf_network_config == network
+        assert restored.network_config == network
+
     @pytest.fixture(autouse=True)
     def fixture(self, mocker):
         # patch cloud_dir, so our 'seed_dir' is guaranteed empty
@@ -1609,6 +1721,8 @@ scbus-1 on xpt0 bus 0
         }
         dsrc = get_ds(data)
         expected_cfg = {
+            "DisableIMDS": False,
+            "DisableWireserver": False,
             "PreprovisionedVMType": None,
             "PreprovisionedVm": False,
             "ProvisionGuestProxyAgent": False,
@@ -1836,6 +1950,8 @@ scbus-1 on xpt0 bus 0
         assert ret
 
         assert dsrc.cfg == {
+            "DisableIMDS": False,
+            "DisableWireserver": False,
             "PreprovisionedVMType": None,
             "PreprovisionedVm": False,
             "ProvisionGuestProxyAgent": False,
@@ -2533,6 +2649,22 @@ scbus-1 on xpt0 bus 0
 class TestLoadAzureDsDir:
     """Tests for load_azure_ds_dir."""
 
+    def test_loads_azure_stack_configuration(self, tmp_path):
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": True}}}
+        (tmp_path / "ovf-env.xml").write_text(
+            construct_ovf_env(
+                disable_imds=True,
+                disable_wireserver=True,
+                network=network,
+            )
+        )
+
+        _md, _ud, cfg, _files = dsaz.load_azure_ds_dir(str(tmp_path))
+
+        assert cfg["DisableIMDS"] is True
+        assert cfg["DisableWireserver"] is True
+        assert cfg["Network"] == network
+
     def test_missing_ovf_env_xml_raises_non_azure_datasource_error(
         self, tmp_path
     ):
@@ -3028,6 +3160,15 @@ class TestAzureNetExists:
 
 
 class TestPreprovisioningReadAzureOvfFlag:
+    @pytest.mark.parametrize("value", [None, False, True])
+    def test_read_azure_stack_flags(self, value):
+        _md, _ud, cfg = dsaz.read_azure_ovf(
+            construct_ovf_env(disable_imds=value, disable_wireserver=value)
+        )
+
+        assert cfg["DisableIMDS"] is bool(value)
+        assert cfg["DisableWireserver"] is bool(value)
+
     def test_read_azure_ovf_with_true_flag(self):
         """The read_azure_ovf method should set the PreprovisionedVM
         cfg flag if the proper setting is present."""
@@ -3507,11 +3648,149 @@ class TestRemoveUbuntuNetworkConfigScripts:
             assert mock.call(path) in calls
 
 
+class TestAzureLocalConfiguration:
+    def test_new_policy_invalidates_network_config(
+        self, azure_ds, mock_chassis_asset_tag
+    ):
+        mock_chassis_asset_tag.return_value = (
+            identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        for dhcp4 in (False, True):
+            network = {
+                "version": 2,
+                "ethernets": {"eth0": {"dhcp4": dhcp4}},
+            }
+            azure_ds._apply_azure_local_config(
+                {"DisableIMDS": True, "Network": network}
+            )
+
+            assert azure_ds.network_config == network
+
+    def test_restored_platform_does_not_reuse_local_network(
+        self,
+        azure_ds,
+        mock_chassis_asset_tag,
+        mock_generate_fallback_config,
+    ):
+        mock_chassis_asset_tag.side_effect = [
+            identity.ChassisAssetTag.AZURE_LOCAL,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+        ]
+        cfg = {
+            "DisableIMDS": True,
+            "DisableWireserver": True,
+            "Network": {"version": 2, "ethernets": {"eth0": {"dhcp4": False}}},
+        }
+        azure_ds._apply_azure_local_config(cfg)
+        assert azure_ds.network_config == cfg["Network"]
+        state = azure_ds.__getstate__()
+        restored = dsaz.DataSourceAzure.__new__(dsaz.DataSourceAzure)
+        restored.__setstate__(state)
+        fallback = {"version": 2, "ethernets": {"eth0": {"dhcp4": True}}}
+        mock_generate_fallback_config.return_value = fallback
+
+        restored._apply_azure_local_config(cfg)
+
+        assert restored._disable_imds is False
+        assert restored._disable_wireserver is False
+        assert restored._ovf_network_config is None
+        assert restored.network_config == fallback
+
+    @pytest.mark.parametrize(
+        "tag",
+        [
+            None,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+            identity.ChassisAssetTag.AZURE_LOCAL,
+        ],
+    )
+    def test_identity_is_lazy_and_cached(
+        self, azure_ds, mock_chassis_asset_tag, tag
+    ):
+        mock_chassis_asset_tag.return_value = tag
+        mock_chassis_asset_tag.assert_not_called()
+
+        assert azure_ds._chassis_asset_tag is tag
+        assert azure_ds._chassis_asset_tag is tag
+        azure_ds.ds_detect()
+        azure_ds._apply_azure_local_config({})
+
+        mock_chassis_asset_tag.assert_called_once_with()
+
+    def test_identity_is_per_instance(self, azure_ds, mock_chassis_asset_tag):
+        other = dsaz.DataSourceAzure(
+            azure_ds.sys_cfg, azure_ds.distro, azure_ds.paths
+        )
+        mock_chassis_asset_tag.side_effect = [
+            identity.ChassisAssetTag.AZURE_LOCAL,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+        ]
+
+        assert (
+            azure_ds._chassis_asset_tag is identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        assert other._chassis_asset_tag is identity.ChassisAssetTag.AZURE_CLOUD
+        assert (
+            azure_ds._chassis_asset_tag is identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        assert mock_chassis_asset_tag.call_count == 2
+
+    @pytest.mark.parametrize(
+        "tag",
+        [
+            None,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+            identity.ChassisAssetTag.AZURE_LOCAL,
+        ],
+    )
+    def test_identity_is_refreshed_on_unpickle(
+        self, azure_ds, mock_chassis_asset_tag, tag
+    ):
+        mock_chassis_asset_tag.side_effect = [
+            tag,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+        ]
+        assert azure_ds._chassis_asset_tag is tag
+
+        state = azure_ds.__getstate__()
+        restored = dsaz.DataSourceAzure.__new__(dsaz.DataSourceAzure)
+        restored.__setstate__(state)
+
+        assert (
+            restored._chassis_asset_tag is identity.ChassisAssetTag.AZURE_CLOUD
+        )
+        assert mock_chassis_asset_tag.call_count == 2
+
+    def test_missing_options_reset_policy(
+        self, azure_ds, mock_chassis_asset_tag
+    ):
+        mock_chassis_asset_tag.return_value = (
+            identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        azure_ds._apply_azure_local_config(
+            {
+                "DisableIMDS": True,
+                "DisableWireserver": True,
+                "Network": {"version": 2, "ethernets": {}},
+            }
+        )
+        assert azure_ds._disable_imds is True
+        assert azure_ds._disable_wireserver is True
+        assert azure_ds._ovf_network_config is not None
+
+        azure_ds._apply_azure_local_config({})
+
+        assert azure_ds._disable_imds is False
+        assert azure_ds._disable_wireserver is False
+        assert azure_ds._ovf_network_config is None
+
+
 class TestIsPlatformViable:
     @pytest.mark.parametrize(
         "tag",
         [
-            identity.ChassisAssetTag.AZURE_CLOUD.value,
+            identity.ChassisAssetTag.AZURE_CLOUD,
+            identity.ChassisAssetTag.AZURE_LOCAL,
         ],
     )
     def test_true_on_azure_chassis(
@@ -3519,18 +3798,18 @@ class TestIsPlatformViable:
     ):
         mock_chassis_asset_tag.return_value = tag
 
-        assert dsaz.DataSourceAzure.ds_detect(None) is True
+        assert azure_ds.ds_detect() is True
 
     def test_true_on_azure_ovf_env_in_seed_dir(
-        self, azure_ds, mock_chassis_asset_tag, tmpdir
+        self, azure_ds, mock_chassis_asset_tag
     ):
-        mock_chassis_asset_tag.return_value = "notazure"
+        mock_chassis_asset_tag.return_value = None
 
         seed_path = Path(azure_ds.seed_dir, "ovf-env.xml")
         seed_path.parent.mkdir(exist_ok=True, parents=True)
         seed_path.write_text("")
 
-        assert dsaz.DataSourceAzure.ds_detect(seed_path.parent) is True
+        assert azure_ds.ds_detect() is True
 
     def test_false_on_no_matching_azure_criteria(
         self, azure_ds, mock_chassis_asset_tag
@@ -4110,6 +4389,222 @@ class TestInstanceId:
 
 
 class TestProvisioning:
+    @pytest.mark.parametrize(
+        "selection", ["detected", "single", "ds=Azure", "ci.ds=Azure"]
+    )
+    @pytest.mark.parametrize(
+        "asset_tag",
+        [
+            "7783-7084-3265-9085-8269-3286-77",
+            "6590-8582-6932-7679-6765-7632-8677",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "disable_imds,disable_wireserver",
+        [(False, False), (True, False), (False, True), (True, True)],
+    )
+    def test_azure_local_service_options(
+        self,
+        selection,
+        asset_tag,
+        disable_imds,
+        disable_wireserver,
+        caplog,
+        mocker,
+    ):
+        self.azure_ds.sys_cfg["datasource_list"] = (
+            ["Azure"] if selection == "single" else ["Azure", "None"]
+        )
+        mocker.patch.object(
+            dsaz.util,
+            "get_cmdline",
+            return_value=selection if "=" in selection else "",
+        )
+
+        def read_dmi(key):
+            if key == "chassis-asset-tag":
+                return asset_tag
+            if key == "system-uuid":
+                return "50109936-ef07-47fe-ac82-890c853f60d5"
+            raise AssertionError("Unexpected DMI query: %s" % key)
+
+        self.mock_dmi_read_dmi_data.side_effect = read_dmi
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": False}}}
+        ovf = construct_ovf_env(
+            disable_imds=disable_imds,
+            disable_wireserver=disable_wireserver,
+            network=network,
+        )
+        md, ud, cfg = dsaz.read_azure_ovf(ovf)
+        self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+        self.mock_readurl.return_value = mock.MagicMock(
+            contents=json.dumps(self.imds_md).encode()
+        )
+        self.mock_azure_get_metadata_from_fabric.return_value = []
+        caplog.clear()
+
+        assert self.azure_ds._check_and_get_data() is True
+
+        is_local = asset_tag == "6590-8582-6932-7679-6765-7632-8677"
+        imds_disabled = is_local and disable_imds
+        wireserver_disabled = is_local and disable_wireserver
+        assert self.azure_ds._disable_imds is imds_disabled
+        assert self.azure_ds._disable_wireserver is wireserver_disabled
+        assert self.azure_ds._ovf_network_config == (
+            network if is_local else None
+        )
+        if imds_disabled and wireserver_disabled:
+            self.mock_wrapping_setup_ephemeral_networking.assert_not_called()
+            self.mock_net_dhcp_maybe_perform_dhcp_discovery.assert_not_called()
+        else:
+            self.mock_wrapping_setup_ephemeral_networking.assert_called_once_with(
+                timeout_minutes=5 if imds_disabled else 20
+            )
+        assert self.mock_readurl.call_count == (0 if imds_disabled else 1)
+        assert self.mock_azure_get_metadata_from_fabric.call_count == (
+            0 if wireserver_disabled else 1
+        )
+        self.mock_kvp_report_success_to_host.assert_called_once_with(
+            vm_id=self.azure_ds._vm_id
+        )
+        assert (
+            self.mock_dmi_read_dmi_data.call_args_list.count(
+                mock.call("chassis-asset-tag")
+            )
+            == 1
+        )
+        if imds_disabled:
+            assert self.azure_ds.network_config == network
+            assert (
+                "Failed generating network config from IMDS" not in caplog.text
+            )
+            assert "IMDS network metadata has incomplete" not in caplog.text
+        assert (
+            "Network config provided in ovf-env.xml." in caplog.text
+        ) is is_local
+
+    @pytest.mark.parametrize("skip_ready_report", [False, True])
+    def test_host_reporting_without_dhcp(
+        self, mock_chassis_asset_tag, skip_ready_report
+    ):
+        mock_chassis_asset_tag.return_value = (
+            identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        self.azure_ds.ds_cfg["experimental_skip_ready_report"] = (
+            skip_ready_report
+        )
+        self.mock_util_mount_cb.return_value = (
+            *dsaz.read_azure_ovf(construct_ovf_env(disable_wireserver=True)),
+            {},
+        )
+        self.mock_wrapping_setup_ephemeral_networking.side_effect = (
+            dhcp.NoDHCPLeaseError("No DHCP lease")
+        )
+
+        assert self.azure_ds._check_and_get_data() is True
+
+        assert self.mock_kvp_report_success_to_host.call_count == (
+            0 if skip_ready_report else 1
+        )
+        self.mock_azure_get_metadata_from_fabric.assert_not_called()
+        self.mock_readurl.assert_not_called()
+
+    @pytest.mark.parametrize("disable_wireserver", [False, True])
+    @pytest.mark.parametrize(
+        "pps_type",
+        [
+            dsaz.PPSType.RUNNING,
+            dsaz.PPSType.SAVABLE,
+            dsaz.PPSType.OS_DISK,
+            dsaz.PPSType.UNKNOWN,
+        ],
+    )
+    def test_preprovisioning_requires_imds(
+        self, mock_chassis_asset_tag, mocker, pps_type, disable_wireserver
+    ):
+        mock_chassis_asset_tag.return_value = (
+            identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        ovf = construct_ovf_env(
+            disable_imds=True,
+            disable_wireserver=disable_wireserver,
+            preprovisioned_vm_type=(
+                None if pps_type is dsaz.PPSType.UNKNOWN else pps_type.value
+            ),
+        )
+        md, ud, cfg = dsaz.read_azure_ovf(ovf)
+        self.mock_util_mount_cb.return_value = (md, ud, cfg, {})
+        if pps_type is dsaz.PPSType.UNKNOWN:
+            self.patched_reported_ready_marker_path.parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            self.patched_reported_ready_marker_path.touch()
+        waits = [
+            mocker.patch.object(self.azure_ds, method)
+            for method in (
+                "_wait_for_pps_running_reuse",
+                "_wait_for_pps_savable_reuse",
+                "_wait_for_pps_os_disk_shutdown",
+                "_wait_for_pps_unknown_reuse",
+            )
+        ]
+        reprovision = mocker.patch.object(
+            self.azure_ds, "_reprovision", return_value=(md, ud, cfg, {})
+        )
+
+        with pytest.raises(
+            errors.ReportableErrorOvfInvalidMetadata,
+            match="preprovisioning requires IMDS",
+        ):
+            self.azure_ds.crawl_metadata()
+
+        self.mock_readurl.assert_not_called()
+        self.mock_wrapping_setup_ephemeral_networking.assert_not_called()
+        reprovision.assert_not_called()
+        for wait in waits:
+            wait.assert_not_called()
+
+    def test_reprovision_applies_azure_local_options(
+        self, mock_chassis_asset_tag, mocker
+    ):
+        mock_chassis_asset_tag.return_value = (
+            identity.ChassisAssetTag.AZURE_LOCAL
+        )
+        self.mock_util_mount_cb.return_value = (
+            *dsaz.read_azure_ovf(construct_ovf_env(preprovisioned_vm=True)),
+            {},
+        )
+        network = {"version": 2, "ethernets": {"eth0": {"dhcp4": True}}}
+        mocker.patch.object(self.azure_ds, "_wait_for_pps_running_reuse")
+        mocker.patch.object(
+            self.azure_ds,
+            "_reprovision",
+            return_value=(
+                *dsaz.read_azure_ovf(
+                    construct_ovf_env(
+                        disable_imds=True,
+                        disable_wireserver=True,
+                        network=network,
+                    )
+                ),
+                {},
+            ),
+        )
+        self.mock_readurl.return_value = mock.MagicMock(
+            contents=json.dumps(self.imds_md).encode()
+        )
+
+        assert self.azure_ds._check_and_get_data() is True
+
+        assert self.mock_readurl.call_count == 1
+        self.mock_azure_get_metadata_from_fabric.assert_not_called()
+        self.mock_kvp_report_success_to_host.assert_called_once_with(
+            vm_id=self.azure_ds._vm_id
+        )
+        assert self.azure_ds._disable_imds is True
+        assert self.azure_ds._disable_wireserver is True
+        assert self.azure_ds.network_config == network
+
     @pytest.fixture(autouse=True)
     def provisioning_setup(
         self,
@@ -5748,6 +6243,18 @@ class TestCheckAzureProxyAgent:
 
 
 class TestGetMetadataFromImds:
+    def test_disable_imds_skips_query(
+        self,
+        azure_ds,
+        mock_imds_fetch_metadata_with_api_fallback,
+        mock_wrapping_report_failure,
+    ):
+        azure_ds._disable_imds = True
+
+        assert azure_ds.get_metadata_from_imds(report_failure=True) == {}
+        mock_imds_fetch_metadata_with_api_fallback.assert_not_called()
+        mock_wrapping_report_failure.assert_not_called()
+
     @pytest.mark.parametrize("route_configured_for_imds", [False, True])
     @pytest.mark.parametrize("report_failure", [False, True])
     @pytest.mark.parametrize(
@@ -5821,6 +6328,29 @@ class TestGetMetadataFromImds:
 
 class TestReportFailure:
     @pytest.mark.parametrize("kvp_enabled", [False, True])
+    def test_disable_wireserver_keeps_host_reporting(
+        self,
+        azure_ds,
+        kvp_enabled,
+        mock_azure_report_failure_to_fabric,
+        mock_kvp_report_via_kvp,
+        mock_report_dmesg_to_kvp,
+        mock_wrapping_setup_ephemeral_networking,
+    ):
+        azure_ds._disable_wireserver = True
+        mock_kvp_report_via_kvp.return_value = kvp_enabled
+        error = errors.ReportableError(reason="foo")
+
+        assert azure_ds._report_failure(error) is kvp_enabled
+
+        mock_kvp_report_via_kvp.assert_called_once_with(
+            error.as_encoded_report(vm_id=azure_ds._vm_id)
+        )
+        mock_azure_report_failure_to_fabric.assert_not_called()
+        mock_wrapping_setup_ephemeral_networking.assert_not_called()
+        mock_report_dmesg_to_kvp.assert_called_once_with()
+
+    @pytest.mark.parametrize("kvp_enabled", [False, True])
     def test_report_host_only_kvp_enabled(
         self,
         azure_ds,
@@ -5841,6 +6371,28 @@ class TestReportFailure:
         assert mock_kvp_report_success_to_host.mock_calls == []
         assert mock_azure_report_failure_to_fabric.mock_calls == []
         assert mock_report_dmesg_to_kvp.mock_calls == [mock.call()]
+
+
+class TestReportReady:
+    def test_disable_wireserver_keeps_host_reporting(
+        self,
+        azure_ds,
+        mock_azure_get_metadata_from_fabric,
+        mock_kvp_report_success_to_host,
+        mock_report_dmesg_to_kvp,
+    ):
+        azure_ds._disable_wireserver = True
+        azure_ds._iso_dev = "/dev/sr0"
+
+        assert azure_ds._report_ready() is None
+
+        mock_azure_get_metadata_from_fabric.assert_not_called()
+        mock_kvp_report_success_to_host.assert_called_once_with(
+            vm_id=azure_ds._vm_id
+        )
+        mock_report_dmesg_to_kvp.assert_called_once_with()
+        assert azure_ds._iso_dev is None
+        assert azure_ds._negotiated is True
 
 
 class TestValidateIMDSMetadata:
