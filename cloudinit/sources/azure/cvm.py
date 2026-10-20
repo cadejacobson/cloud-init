@@ -148,7 +148,7 @@ def is_secrets_provisioning_enabled() -> bool:
 def unprotect_secret(field: str, token: str) -> str:
     """Decrypt a single ovf-env.xml secret via azure-protected-secrets-tool.
 
-    Runs ``unprotect-secret --policy 0`` (require both signature and
+    Runs ``unprotect-secret --policy 4`` (require both signature and
     encryption) with the encrypted ``token`` piped on stdin and returns the
     decrypted plaintext, which the tool writes to stdout.
 
@@ -165,7 +165,7 @@ def unprotect_secret(field: str, token: str) -> str:
     )
     try:
         result = subp.subp(
-            [SECRETS_TOOL, "unprotect-secret", "--policy", "0"],
+            [SECRETS_TOOL, "unprotect-secret", "--policy", "4"],
             data=token,
         )
     except subp.ProcessExecutionError as error:
