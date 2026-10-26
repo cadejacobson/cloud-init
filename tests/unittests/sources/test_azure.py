@@ -3519,18 +3519,18 @@ class TestIsPlatformViable:
     ):
         mock_chassis_asset_tag.return_value = tag
 
-        assert dsaz.DataSourceAzure.ds_detect(None) is True
+        assert azure_ds.ds_detect() is True
 
     def test_true_on_azure_ovf_env_in_seed_dir(
-        self, azure_ds, mock_chassis_asset_tag, tmpdir
+        self, azure_ds, mock_chassis_asset_tag
     ):
-        mock_chassis_asset_tag.return_value = "notazure"
+        mock_chassis_asset_tag.return_value = None
 
         seed_path = Path(azure_ds.seed_dir, "ovf-env.xml")
         seed_path.parent.mkdir(exist_ok=True, parents=True)
         seed_path.write_text("")
 
-        assert dsaz.DataSourceAzure.ds_detect(seed_path.parent) is True
+        assert azure_ds.ds_detect() is True
 
     def test_false_on_no_matching_azure_criteria(
         self, azure_ds, mock_chassis_asset_tag
@@ -3539,13 +3539,8 @@ class TestIsPlatformViable:
 
         seed_path = Path(azure_ds.seed_dir, "ovf-env.xml")
         seed_path.parent.mkdir(exist_ok=True, parents=True)
-        paths = helpers.Paths(
-            {"cloud_dir": "/tmp/", "run_dir": "/tmp/", "seed_dir": seed_path}
-        )
 
-        assert (
-            dsaz.DataSourceAzure({}, mock.Mock(), paths).ds_detect() is False
-        )
+        assert azure_ds.ds_detect() is False
 
 
 class TestRandomSeed:
