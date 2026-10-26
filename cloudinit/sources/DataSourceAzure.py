@@ -299,6 +299,7 @@ BUILTIN_DS_CONFIG = {
     "apply_network_config_for_secondary_ips": True,  # Configure secondary ips
     "experimental_fail_on_missing_customdata": False,
     "apply_network_config_set_name": True,  # Use set-name for NICs
+    "experimental_azure_local_support": False,
     "experimental_skip_ready_report": False,  # Skip final ready report
 }
 
@@ -372,6 +373,7 @@ class DataSourceAzure(sources.DataSource):
             "apply_network_config_for_secondary_ips",
             "experimental_fail_on_missing_customdata",
             "apply_network_config_set_name",
+            "experimental_azure_local_support",
             "experimental_skip_ready_report",
         ):
             self.ds_cfg.setdefault(key, BUILTIN_DS_CONFIG[key])
@@ -961,8 +963,13 @@ class DataSourceAzure(sources.DataSource):
         run.
         """
         chassis_tag = identity.ChassisAssetTag.query_system()
-        if chassis_tag is not None:
+        if chassis_tag is identity.ChassisAssetTag.AZURE_CLOUD:
             return True
+        if chassis_tag is identity.ChassisAssetTag.AZURE_LOCAL:
+            return (
+                self.ds_cfg.get("experimental_azure_local_support", False)
+                is True
+            )
 
         # If no valid chassis tag, check for seeded ovf-env.xml.
         return Path(self.seed_dir, "ovf-env.xml").exists()

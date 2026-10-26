@@ -79,7 +79,10 @@ def query_vm_id() -> str:
 
 
 class ChassisAssetTag(enum.Enum):
+    # ASCII for MSFT AZURE VM
     AZURE_CLOUD = "7783-7084-3265-9085-8269-3286-77"
+    # ASCII for AZURE LOCAL VM
+    AZURE_LOCAL = "6590-8582-6932-7679-6765-7632-8677"
 
     @classmethod
     def query_system(cls) -> Optional["ChassisAssetTag"]:
