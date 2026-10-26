@@ -19,7 +19,7 @@ except ImportError:
 import pytest
 import requests
 
-from cloudinit import distros, dmi, helpers, subp, url_helper
+from cloudinit import distros, dmi, subp, url_helper
 from cloudinit.atomic_helper import b64e, json_dumps
 from cloudinit.config import cc_mounts
 from cloudinit.net import dhcp, ephemeral
