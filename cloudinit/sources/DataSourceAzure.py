@@ -360,6 +360,15 @@ class DataSourceAzure(sources.DataSource):
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
 
     def _unpickle(self, ci_pkl_version: int) -> None:
+        LOG.debug(
+            "Unpickling Azure datasource: pickle_version=%s, "
+            "cached_platform=%s, ovf_network_config_present=%s, "
+            "network_config_present=%s",
+            ci_pkl_version,
+            self.__dict__.get("_chassis_asset_tag"),
+            bool(getattr(self, "_ovf_network_config", None)),
+            bool(getattr(self, "_network_config", None)),
+        )
         super()._unpickle(ci_pkl_version)
 
         self._ephemeral_dhcp_ctx = None
@@ -384,6 +393,17 @@ class DataSourceAzure(sources.DataSource):
             "experimental_skip_ready_report",
         ):
             self.ds_cfg.setdefault(key, BUILTIN_DS_CONFIG[key])
+        LOG.debug(
+            "Azure datasource unpickled: cached platform invalidated; "
+            "disable_imds=%s, disable_wireserver=%s, "
+            "ovf_network_config_present=%s, network_config_present=%s, "
+            "apply_network_config=%s",
+            self._disable_imds,
+            self._disable_wireserver,
+            bool(self._ovf_network_config),
+            bool(getattr(self, "_network_config", None)),
+            self.ds_cfg.get("apply_network_config"),
+        )
 
     def __str__(self):
         root = sources.DataSource.__str__(self)
@@ -400,11 +420,24 @@ class DataSourceAzure(sources.DataSource):
         self._disable_wireserver = False
         self._ovf_network_config = None
         if self._chassis_asset_tag is not identity.ChassisAssetTag.AZURE_LOCAL:
+            LOG.debug(
+                "Ignoring Azure Local OVF configuration: platform=%s",
+                self._chassis_asset_tag,
+            )
             return
 
         self._disable_imds = bool(cfg.get("DisableIMDS"))
         self._disable_wireserver = bool(cfg.get("DisableWireserver"))
         self._ovf_network_config = cfg.get("Network")
+        LOG.debug(
+            "Azure Local OVF configuration applied: disable_imds=%s, "
+            "disable_wireserver=%s, ovf_network_config_present=%s, "
+            "apply_network_config=%s",
+            self._disable_imds,
+            self._disable_wireserver,
+            bool(self._ovf_network_config),
+            self.ds_cfg.get("apply_network_config"),
+        )
         if self._disable_imds:
             report_diagnostic_event("DisableIMDS: True", logger_func=LOG.info)
         if self._disable_wireserver:
