@@ -373,14 +373,14 @@ class DataSourceAzure(sources.DataSource):
 
         self._ephemeral_dhcp_ctx = None
         self._iso_dev = None
-        self._ovf_network_config = None
+        self._ovf_network_config = getattr(self, "_ovf_network_config", None)
         self._reported_ready_marker_file = os.path.join(
             self.paths.cloud_dir, "data", "reported_ready"
         )
         self._route_configured_for_imds = False
         self._route_configured_for_wireserver = False
-        self._disable_imds = False
-        self._disable_wireserver = False
+        self._disable_imds = getattr(self, "_disable_imds", False)
+        self._disable_wireserver = getattr(self, "_disable_wireserver", False)
         self._system_uuid = None
         self._vm_id = None
         self._wireserver_endpoint = DEFAULT_WIRESERVER_ENDPOINT
