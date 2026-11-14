@@ -712,7 +712,10 @@ class DataSourceAzure(sources.DataSource):
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
         chassis_tag = identity.ChassisAssetTag.query_system()
-        if chassis_tag is identity.ChassisAssetTag.AZURE_STACK:
+        if chassis_tag in (
+            identity.ChassisAssetTag.AZURE_STACK,
+            identity.ChassisAssetTag.AZURE_STACK_2,
+        ):
             # Azure Stack may opt out of IMDS and/or Wireserver via
             # ovf-env.xml and may provide a native v2 network config.
             self._disable_imds = bool(cfg.get("DisableIMDS"))
