@@ -16,6 +16,8 @@ from typing import Callable, List, Optional, TypeVar, Union
 from xml.etree import ElementTree as ET  # nosec B405
 from xml.sax.saxutils import escape  # nosec B406
 
+import yaml
+
 from cloudinit import distros, subp, temp_utils, url_helper, util, version
 from cloudinit.reporting import events
 from cloudinit.sources.azure import certs, errors
@@ -985,6 +987,9 @@ class OvfEnvXml:
         preprovisioned_vm: bool = False,
         preprovisioned_vm_type: Optional[str] = None,
         provision_guest_proxy_agent: bool = False,
+        disable_imds: bool = False,
+        disable_wireserver: bool = False,
+        network: Optional[dict] = None,
     ) -> None:
         self.username = username
         self.password = password
@@ -995,6 +1000,9 @@ class OvfEnvXml:
         self.preprovisioned_vm = preprovisioned_vm
         self.preprovisioned_vm_type = preprovisioned_vm_type
         self.provision_guest_proxy_agent = provision_guest_proxy_agent
+        self.disable_imds = disable_imds
+        self.disable_wireserver = disable_wireserver
+        self.network = network
 
     def __eq__(self, other) -> bool:
         return self.__dict__ == other.__dict__
@@ -1021,6 +1029,7 @@ class OvfEnvXml:
         instance = OvfEnvXml()
         instance._parse_linux_configuration_set_section(root)
         instance._parse_platform_settings_section(root)
+        instance._parse_azure_local_configuration_section(root)
 
         return instance
 
@@ -1160,6 +1169,52 @@ class OvfEnvXml:
             default=False,
             required=False,
         )
+
+    def _parse_azure_local_configuration_section(self, root):
+        """Parse the optional Azure Local configuration section."""
+        if (
+            root.find("./wa:AzureStackConfigurationSection", self.NAMESPACES)
+            is None
+        ):
+            return
+
+        section = self._find(
+            root, "AzureStackConfigurationSection", required=False
+        )
+        self.disable_imds = self._parse_property(
+            section,
+            "DisableIMDS",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+        self.disable_wireserver = self._parse_property(
+            section,
+            "DisableWireserver",
+            parse_bool=True,
+            default=False,
+            required=False,
+        )
+        network_data = self._parse_property(
+            section,
+            "Network",
+            decode_base64=True,
+            required=False,
+        )
+        if network_data is not None:
+            try:
+                self.network = yaml.safe_load(network_data)
+            except yaml.YAMLError as error:
+                raise errors.ReportableErrorOvfInvalidMetadata(
+                    "failed to parse 'Network' as YAML"
+                ) from error
+        if self.network is not None and (
+            not isinstance(self.network, dict)
+            or self.network.get("version") != 2
+        ):
+            raise errors.ReportableErrorOvfInvalidMetadata(
+                "'Network' must be a version 2 network configuration"
+            )
 
     def _parse_ssh_section(self, config_set):
         self.public_keys = []
