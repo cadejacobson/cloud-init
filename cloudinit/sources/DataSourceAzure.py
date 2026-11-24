@@ -700,7 +700,11 @@ class DataSourceAzure(sources.DataSource):
         @raise: InvalidMetaDataException when the expected metadata service is
             unavailable, broken or disabled.
         """
-        print(f"is_azure_chassis: {run_is_azure_chassis()}")
+        LOG.info("is_azure_chassis: %s", run_is_azure_chassis())
+        LOG.info(
+            "ChassisAssetTag.query_system: %s",
+            identity.ChassisAssetTag.query_system(),
+        )
         self._query_vm_id()
         report_diagnostic_event(
             "Azure VM ID: %s System UUID: %s"

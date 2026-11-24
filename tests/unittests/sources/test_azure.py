@@ -1643,14 +1643,22 @@ scbus-1 on xpt0 bus 0
         assert dsrc._metadata_imds == UNSET
         assert not os.path.isfile(os.path.join(waagent_d, "ovf-env.xml"))
 
-    def test_crawl_metadata_runs_is_azure_chassis(self, get_ds, capsys):
+    def test_crawl_metadata_runs_is_azure_chassis(self, get_ds, caplog):
         dsrc = get_ds({"ovfcontent": construct_ovf_env(), "sys_cfg": {}})
         self.m_run_is_azure_chassis.return_value = True
+        with mock.patch.object(
+            identity.ChassisAssetTag,
+            "query_system",
+            return_value=identity.ChassisAssetTag.AZURE_CLOUD,
+        ) as m_query_system:
+            dsrc.crawl_metadata()
 
-        dsrc.crawl_metadata()
-
+        m_query_system.assert_called_once_with()
         self.m_run_is_azure_chassis.assert_called_once_with()
-        assert "is_azure_chassis: True" in capsys.readouterr().out
+        assert "is_azure_chassis: True" in caplog.text
+        assert "ChassisAssetTag.query_system: ChassisAssetTag.AZURE_CLOUD" in (
+            caplog.text
+        )
 
     def test_crawl_metadata_raises_invalid_metadata_on_error(self, get_ds):
         """crawl_metadata raises an exception on invalid ovf-env.xml."""
