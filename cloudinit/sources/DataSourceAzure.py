@@ -84,6 +84,46 @@ UBUNTU_EXTENDED_NETWORK_SCRIPTS = [
 ]
 
 
+def run_is_azure_chassis() -> bool:
+    """Run ds-identify's is_azure_chassis function and return its result."""
+    project_script = (
+        Path(__file__).resolve().parents[2] / "tools" / "ds-identify"
+    )
+    installed_scripts = (
+        Path("/usr/lib/cloud-init/ds-identify"),
+        Path("/usr/libexec/cloud-init/ds-identify"),
+        Path("/usr/local/lib/cloud-init/ds-identify"),
+        Path("/usr/local/libexec/cloud-init/ds-identify"),
+    )
+    ds_identify = next(
+        (
+            script
+            for script in (project_script, *installed_scripts)
+            if script.is_file()
+        ),
+        None,
+    )
+    if ds_identify is None:
+        raise FileNotFoundError("Unable to locate ds-identify")
+
+    command = """
+        . "$1"
+        read_uname_info
+        read_virt
+        read_dmi_chassis_asset_tag
+        if is_azure_chassis; then
+            printf '%s\\n' true
+        else
+            printf '%s\\n' false
+        fi
+    """
+    result = subp.subp(
+        ["/bin/sh", "-c", command, "sh", str(ds_identify)],
+        update_env={"DI_MAIN": "noop"},
+    )
+    return result.stdout.strip().splitlines()[-1] == "true"
+
+
 def find_storvscid_from_sysctl_pnpinfo(sysctl_out, deviceid):
     # extract the 'X' from dev.storvsc.X. if deviceid matches
     """
@@ -660,6 +700,7 @@ class DataSourceAzure(sources.DataSource):
         @raise: InvalidMetaDataException when the expected metadata service is
             unavailable, broken or disabled.
         """
+        print(f"is_azure_chassis: {run_is_azure_chassis()}")
         self._query_vm_id()
         report_diagnostic_event(
             "Azure VM ID: %s System UUID: %s"

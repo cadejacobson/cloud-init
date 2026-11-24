@@ -1199,6 +1199,9 @@ class TestAzureDataSource:
     def fixture(self, mocker):
         # patch cloud_dir, so our 'seed_dir' is guaranteed empty
         mocker.patch.object(dsaz, "_get_random_seed", return_value="wild")
+        self.m_run_is_azure_chassis = mocker.patch.object(
+            dsaz, "run_is_azure_chassis", return_value=False
+        )
 
         self.m_dhcp = mocker.patch.object(
             dsaz,
@@ -1639,6 +1642,15 @@ scbus-1 on xpt0 bus 0
         assert dsrc.metadata == {}
         assert dsrc._metadata_imds == UNSET
         assert not os.path.isfile(os.path.join(waagent_d, "ovf-env.xml"))
+
+    def test_crawl_metadata_runs_is_azure_chassis(self, get_ds, capsys):
+        dsrc = get_ds({"ovfcontent": construct_ovf_env(), "sys_cfg": {}})
+        self.m_run_is_azure_chassis.return_value = True
+
+        dsrc.crawl_metadata()
+
+        self.m_run_is_azure_chassis.assert_called_once_with()
+        assert "is_azure_chassis: True" in capsys.readouterr().out
 
     def test_crawl_metadata_raises_invalid_metadata_on_error(self, get_ds):
         """crawl_metadata raises an exception on invalid ovf-env.xml."""
